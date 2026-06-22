@@ -15,7 +15,10 @@ from ..client import APIError, ClientError, MemoryClient
 from ..config import DEFAULT_ENVIRONMENT, NAMED_ENVIRONMENTS, ConfigError, resolve
 from ..render import err_console, render_memories, render_search
 
-app = typer.Typer(no_args_is_help=True, help="Probe agent vector memory.")
+app = typer.Typer(
+    no_args_is_help=True,
+    help="Inspect the agent's per-user vector memory (list stored, probe recall).",
+)
 
 # Shared connection options. Declared once so both commands stay in sync.
 # Env vars are resolved in config.resolve (not via Typer's envvar=) so the

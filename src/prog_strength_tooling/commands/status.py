@@ -27,7 +27,12 @@ def status(
     timeout: float = typer.Option(5.0, "--timeout", help="Per-service timeout, seconds."),
     as_json: bool = typer.Option(False, "--json", help="Emit raw JSON instead of a table."),
 ) -> None:
-    """Check that the backend services are operational and report versions."""
+    """Check backend service health and versions.
+
+    Probes the api, agent, and mcp /health endpoints for the selected
+    environment and reports UP/DOWN, version, and latency. No token needed
+    (health is public). Exits non-zero if any service is down.
+    """
     try:
         environment = resolve_environment(env)
     except ConfigError as exc:
