@@ -31,16 +31,18 @@ whose email is in the API's admin allowlist (the same token `memctl` uses).
 
 ### Picking an environment
 
-The API base URL comes from a registry of **named environments**. The default
-is **`prod`**, so `pst` talks to production out of the box.
+Service URLs come from a registry of **named environments**, each mapping the
+backend services (`api`, `agent`, `mcp`) to their base URLs. The default is
+**`prod`**, so `pst` talks to production out of the box.
 
-| Environment | URL |
-|---|---|
-| `prod` (default) | `https://api.progstrength.fitness` |
-| `local` | `http://localhost:8080` |
+| Environment | api | agent | mcp |
+|---|---|---|---|
+| `prod` (default) | `api.progstrength.fitness` | `agent.progstrength.fitness` | `mcp.progstrength.fitness` |
+| `local` | `localhost:8080` | `localhost:8001` | `localhost:8000` |
 
-Select one with `--env <name>` (or `PST_ENV`), or pass an explicit one-off URL
-with `--api <url>` (or `PST_API_URL`). Resolution precedence, highest first:
+Select one with `--env <name>` (or `PST_ENV`). For the memory commands you can
+also pass an explicit one-off API URL with `--api <url>` (or `PST_API_URL`).
+Resolution precedence for the api URL, highest first:
 
 1. `--api <url>` — explicit URL (flag)
 2. `--env <name>` — named environment (flag)
@@ -69,6 +71,23 @@ export PST_ENV=local
 ```
 
 ## Usage
+
+### Check backend service status
+
+```bash
+pst status                      # all services in prod
+pst status --env local          # target a different environment
+pst status --json               # raw JSON for scripting
+pst status --timeout 2          # per-service timeout (seconds)
+```
+
+Probes the `api`, `agent`, and `mcp` `/health` endpoints and reports whether
+each is **UP/DOWN**, its version, and latency. No token required (health is
+public). **Exits non-zero if any service is down**, so it gates scripts:
+
+```bash
+pst status && ./deploy.sh       # only deploy if everything is healthy
+```
 
 ### List a user's stored memories
 
@@ -106,6 +125,7 @@ Lower distance = closer match.
 
 | Command | Endpoint |
 |---|---|
+| `pst status` | `GET /health` on each of api, agent, mcp |
 | `pst memory list` | `GET /admin/memories?user_id=…` |
 | `pst memory search` | `POST /admin/memories/search` |
 
@@ -121,13 +141,16 @@ uv run ruff check .  # lint
 
 ```
 src/prog_strength_tooling/
-  cli.py              # `pst` entry point; mounts resource sub-apps
+  cli.py              # `pst` entry point; mounts sub-apps + single commands
   commands/memory.py  # `pst memory list` / `search`
+  commands/status.py  # `pst status`
   client.py           # httpx client over the admin endpoints
+  health.py           # GET /health probing for the status command
   models.py           # pydantic views of the API DTOs
   render.py           # rich tables + --json output
-  config.py           # resolve api/token from flags → env → default
+  config.py           # named environments (service URLs) + token resolution
 ```
 
 Adding a new command group (e.g. `pst chat …`): add a module under `commands/`
-with its own `typer.Typer()` app and mount it in `cli.py` with `add_typer`.
+with its own `typer.Typer()` app and mount it in `cli.py` with `add_typer`. For
+a single-shot command, register it on the root app with `app.command(...)`.

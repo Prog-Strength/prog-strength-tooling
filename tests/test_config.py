@@ -9,8 +9,8 @@ from prog_strength_tooling.config import (
     resolve,
 )
 
-PROD = NAMED_ENVIRONMENTS["prod"]
-LOCAL = NAMED_ENVIRONMENTS["local"]
+PROD = NAMED_ENVIRONMENTS["prod"]["api"]
+LOCAL = NAMED_ENVIRONMENTS["local"]["api"]
 
 
 @pytest.fixture(autouse=True)
@@ -83,3 +83,30 @@ def test_token_from_flag_and_env(monkeypatch):
 def test_base_url_strips_trailing_slash():
     cfg = resolve(api="http://api.example.com/", token="t")
     assert cfg.base_url == "http://api.example.com"
+
+
+# --- resolve_environment (used by `pst status`) -------------------------
+
+
+def test_resolve_environment_default_is_prod():
+    from prog_strength_tooling.config import resolve_environment
+
+    env = resolve_environment(None)
+    assert env.name == "prod"
+    assert env.services["api"] == PROD
+    assert set(env.services) == {"api", "agent", "mcp"}
+
+
+def test_resolve_environment_flag_and_pst_env(monkeypatch):
+    from prog_strength_tooling.config import resolve_environment
+
+    assert resolve_environment("local").name == "local"
+    monkeypatch.setenv("PST_ENV", "local")
+    assert resolve_environment(None).name == "local"
+
+
+def test_resolve_environment_unknown_raises():
+    from prog_strength_tooling.config import resolve_environment
+
+    with pytest.raises(ConfigError):
+        resolve_environment("staging")
