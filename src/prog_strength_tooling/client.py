@@ -41,9 +41,7 @@ class MemoryClient:
 
     def __init__(self, cfg: Config, timeout: float = 30.0) -> None:
         if not cfg.token:
-            raise ClientError(
-                "no admin token. Pass --token or set PST_TOKEN to an admin JWT."
-            )
+            raise ClientError("no admin token. Pass --token or set PST_TOKEN to an admin JWT.")
         self._client = httpx.Client(
             base_url=cfg.base_url,
             headers={"Authorization": f"Bearer {cfg.token}"},
@@ -61,9 +59,7 @@ class MemoryClient:
 
     # --- endpoints ------------------------------------------------------
 
-    def list_memories(
-        self, user_id: str, limit: int = 100, offset: int = 0
-    ) -> MemoryList:
+    def list_memories(self, user_id: str, limit: int = 100, offset: int = 0) -> MemoryList:
         """GET /admin/memories — a user's stored memories (paged)."""
         params: dict[str, str | int] = {"limit": limit, "offset": offset}
         if user_id:

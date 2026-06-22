@@ -28,11 +28,12 @@ EnvOption = typer.Option(
     show_default=False,
 )
 ApiOption = typer.Option(
-    None, "--api", help="Explicit API base URL, overrides --env (or PST_API_URL).", show_default=False
+    None,
+    "--api",
+    help="Explicit API base URL, overrides --env (or PST_API_URL).",
+    show_default=False,
 )
-TokenOption = typer.Option(
-    None, "--token", help="Admin JWT (or PST_TOKEN).", show_default=False
-)
+TokenOption = typer.Option(None, "--token", help="Admin JWT (or PST_TOKEN).", show_default=False)
 JsonOption = typer.Option(False, "--json", help="Emit raw JSON instead of a table.")
 
 

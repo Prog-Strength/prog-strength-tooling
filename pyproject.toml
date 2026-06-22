@@ -26,7 +26,12 @@ dev = [
     "pytest>=8.0",
     # Mocks httpx at the transport layer — same approach as the agent repo.
     "respx>=0.21",
+    # Formatter (owner's preference) + linter. black owns formatting; ruff is
+    # lint-only here, so the two don't fight over the same files.
+    "black>=24.10",
     "ruff>=0.6",
+    # Local git hooks (format/lint/commit-msg/tests). See .pre-commit-config.yaml.
+    "pre-commit>=3.7",
 ]
 
 [build-system]
@@ -36,9 +41,15 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/prog_strength_tooling"]
 
+[tool.black]
+line-length = 100
+target-version = ["py312"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+# black owns formatting; keep ruff to lint rules that don't conflict with it.
+# (Default E/F selection is black-compatible at this line length.)
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
