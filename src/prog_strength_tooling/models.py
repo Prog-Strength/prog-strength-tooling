@@ -21,10 +21,13 @@ class Memory(BaseModel):
 
     distilled_text: str
     user_id: str
-    source_session_id: str
-    embedding_model: str
-    embedding_dim: int
     created_at: datetime
+    #: Optional provenance/metadata. Backfilled memories (and older API
+    #: versions) may omit these entirely, so they default rather than making
+    #: the whole dump fail on one sparse row.
+    source_session_id: str = ""
+    embedding_model: str = ""
+    embedding_dim: int = 0
     #: Set when this memory has been superseded by a newer distillation;
     #: None/absent while the row is still the active memory.
     superseded_at: datetime | None = None
@@ -35,8 +38,9 @@ class Match(BaseModel):
 
     text: str
     distance: float
-    source_session_id: str
     created_at: datetime
+    #: May be absent for backfilled memories — default rather than crash.
+    source_session_id: str = ""
 
 
 class MemoryList(BaseModel):

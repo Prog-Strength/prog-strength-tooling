@@ -1,0 +1,62 @@
+"""Model resilience: the dump/search shapes must tolerate optional metadata
+fields being absent. Production returns memories (e.g. backfilled ones) with
+no source_session_id and no embedding metadata; an inspection tool must render
+them, not crash the whole dump on one sparse row."""
+
+from prog_strength_tooling.models import Match, Memory, MemoryList, SearchResult
+
+
+def test_memory_without_source_session_id():
+    # Exact shape that crashed against production: no source_session_id.
+    m = Memory.model_validate(
+        {
+            "distilled_text": "Has benched 225 for reps",
+            "user_id": "u1",
+            "embedding_model": "voyage-3",
+            "embedding_dim": 1024,
+            "created_at": "2026-06-22T04:51:58.782966505Z",
+        }
+    )
+    assert m.source_session_id == ""
+
+
+def test_memory_with_only_core_fields():
+    # The bare minimum an inspection tool should still render.
+    m = Memory.model_validate(
+        {"distilled_text": "x", "user_id": "u1", "created_at": "2026-06-22T04:51:58Z"}
+    )
+    assert m.source_session_id == ""
+    assert m.embedding_model == ""
+    assert m.embedding_dim == 0
+
+
+def test_memory_list_tolerates_sparse_row():
+    result = MemoryList.model_validate(
+        {
+            "memories": [
+                {
+                    "distilled_text": "sparse",
+                    "user_id": "u1",
+                    "created_at": "2026-06-22T04:51:58Z",
+                }
+            ]
+        }
+    )
+    assert len(result.memories) == 1
+
+
+def test_match_without_source_session_id():
+    s = SearchResult.model_validate(
+        {
+            "threshold": 0.7,
+            "matches": [
+                {
+                    "text": "benches 225",
+                    "distance": 0.42,
+                    "created_at": "2026-06-22T04:51:58Z",
+                }
+            ],
+        }
+    )
+    assert isinstance(s.matches[0], Match)
+    assert s.matches[0].source_session_id == ""

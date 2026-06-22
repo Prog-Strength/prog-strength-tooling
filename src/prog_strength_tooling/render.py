@@ -49,8 +49,8 @@ def render_memories(result: MemoryList, *, as_json: bool) -> None:
         table.add_row(
             _fmt_dt(m.created_at),
             m.distilled_text,
-            m.source_session_id,
-            m.embedding_model,
+            m.source_session_id or "-",
+            m.embedding_model or "-",
             str(m.embedding_dim),
             superseded,
         )
@@ -82,7 +82,7 @@ def render_search(result: SearchResult, *, as_json: bool) -> None:
         table.add_row(
             f"{hit.distance:.4f}",
             hit.text,
-            hit.source_session_id,
+            hit.source_session_id or "-",
             _fmt_dt(hit.created_at),
         )
     console.print(table)
