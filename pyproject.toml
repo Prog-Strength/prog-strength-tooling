@@ -67,9 +67,13 @@ pythonpath = ["src"]
 tag_format = "v{version}"
 version_toml = ["pyproject.toml:project.version"]
 version_variables = ["src/prog_strength_tooling/__init__.py:__version__"]
-# Internal operator tool: tag + changelog + GitHub release only, no build or
-# PyPI publish. Empty build command => PSR skips building distributions.
-build_command = ""
+# Internal operator tool: no PyPI publish. The "build" step just re-locks so
+# uv.lock's package version tracks the bump; `assets` makes PSR commit the
+# updated lock with the release, keeping `uv sync --frozen` green on branches
+# cut after a release. Plain `uv lock` (no --upgrade) only touches what must
+# change — this package's own version — so dependencies don't churn.
+build_command = "uv lock"
+assets = ["uv.lock"]
 commit_message = "chore(release): v{version} [skip ci]"
 # Author the release commit as the CI bot rather than a human.
 commit_author = "github-actions[bot] <github-actions[bot]@users.noreply.github.com>"
