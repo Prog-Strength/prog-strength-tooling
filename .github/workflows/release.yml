@@ -1,0 +1,48 @@
+name: Release
+
+# Automated versioning with python-semantic-release. On every push to main
+# (i.e. after a squash-merge), PSR inspects the Conventional Commits since the
+# last vX.Y.Z tag and, if any are releasable (feat/fix/breaking), bumps the
+# version in pyproject.toml + __init__.py, regenerates CHANGELOG.md, commits,
+# tags, and cuts a GitHub release. Chore/docs/ci-only pushes are a no-op.
+#
+# The bump commit is pushed with GITHUB_TOKEN, which does not re-trigger
+# workflows, so there is no release loop (the [skip ci] subject is belt-and-
+# suspenders).
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: semantic-release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # PSR needs full history + tags to determine the next version.
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Sync dependencies (incl. release group)
+        run: uv sync --group release
+
+      - name: Guard — never tag a release off a red main
+        run: uv run pytest
+
+      - name: Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: uv run semantic-release version

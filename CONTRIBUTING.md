@@ -92,6 +92,31 @@ The hooks are configured in `.pre-commit-config.yaml`:
 If a hook updates `.pre-commit-config.yaml` revisions, that's
 `uv run pre-commit autoupdate` — commit it as `chore(ci): …`.
 
+## Releases
+
+Releases are fully automated by
+[python-semantic-release](https://python-semantic-release.readthedocs.io/) —
+**never bump the version or edit `CHANGELOG.md` by hand.** PSR owns
+`[project].version` in `pyproject.toml`, `__version__` in
+`src/prog_strength_tooling/__init__.py`, and the changelog.
+
+When a PR squash-merges to `main`, the `Release` workflow
+(`.github/workflows/release.yml`) runs:
+
+1. Inspects the Conventional Commit subjects since the last `vX.Y.Z` tag.
+2. If any are releasable, computes the next version:
+   - `fix:` → patch (`0.1.0` → `0.1.1`)
+   - `feat:` → minor (`0.1.0` → `0.2.0`)
+   - `feat!:` / `BREAKING CHANGE:` → minor while in `0.x`
+     (`major_on_zero = false`), major once past `1.0.0`
+3. Bumps both version files, regenerates `CHANGELOG.md`, commits
+   `chore(release): vX.Y.Z`, tags `vX.Y.Z`, and publishes a GitHub release.
+4. `chore`/`docs`/`ci`-only pushes release nothing — that's by design.
+
+So the **type you choose on a PR title decides the next version.** There is no
+manual release step. (The tool is internal — releases are a tag + changelog +
+GitHub release; nothing is published to PyPI.)
+
 ## Project layout
 
 See [`README.md`](README.md) for the architecture and module map, and
