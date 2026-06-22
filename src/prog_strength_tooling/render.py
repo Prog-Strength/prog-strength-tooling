@@ -7,10 +7,13 @@ console, and so rendering can be smoke-tested without a server.
 from __future__ import annotations
 
 import json
+from dataclasses import asdict
 
 from rich.console import Console
 from rich.table import Table
 
+from .config import Environment
+from .health import ServiceStatus
 from .models import MemoryList, SearchResult
 
 console = Console()
@@ -91,3 +94,32 @@ def render_search(result: SearchResult, *, as_json: bool) -> None:
 def _print_json(model) -> None:
     """Emit the model as raw, indented JSON for scripting/piping."""
     console.print_json(json.dumps(model.model_dump(mode="json")))
+
+
+def render_status(environment: Environment, results: list[ServiceStatus], *, as_json: bool) -> None:
+    """Render the operational status of an environment's backend services."""
+    if as_json:
+        payload = {
+            "environment": environment.name,
+            "services": [asdict(r) for r in results],
+        }
+        console.print_json(json.dumps(payload))
+        return
+
+    up = sum(1 for r in results if r.up)
+    title = f"backend status — {environment.name}  ({up}/{len(results)} up)"
+    table = Table(title=title)
+    table.add_column("service", style="cyan", no_wrap=True)
+    table.add_column("status", no_wrap=True)
+    table.add_column("version", style="white", no_wrap=True)
+    table.add_column("latency", justify="right", style="dim", no_wrap=True)
+    table.add_column("endpoint", style="dim", overflow="fold")
+
+    for r in results:
+        if r.up:
+            status = "[green]UP[/green]"
+        else:
+            status = f"[red]DOWN[/red] — {r.detail}"
+        latency = f"{r.latency_ms:.0f} ms" if r.latency_ms is not None else "-"
+        table.add_row(r.name, status, r.version or "-", latency, r.url)
+    console.print(table)

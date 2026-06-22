@@ -49,7 +49,8 @@ Python sibling of the Go `memctl` in `prog-strength-api` (the two coexist;
   or commit a token.
 
 ```bash
-export PST_TOKEN=...                          # admin JWT
+pst status                                    # are api/agent/mcp up? what versions? (no token)
+export PST_TOKEN=...                          # admin JWT (for memory commands)
 pst memory list   --user <id>                 # what we store about a user
 pst memory search --user <id> --query "leg day"   # what the agent would recall
 pst memory list   --user <id> --json          # raw JSON for scripting
