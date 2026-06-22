@@ -29,16 +29,43 @@ uv tool install --editable .
 The admin endpoints are gated: you need an **admin JWT** — a normal user token
 whose email is in the API's admin allowlist (the same token `memctl` uses).
 
+### Picking an environment
+
+The API base URL comes from a registry of **named environments**. The default
+is **`prod`**, so `pst` talks to production out of the box.
+
+| Environment | URL |
+|---|---|
+| `prod` (default) | `https://api.progstrength.fitness` |
+| `local` | `http://localhost:8080` |
+
+Select one with `--env <name>` (or `PST_ENV`), or pass an explicit one-off URL
+with `--api <url>` (or `PST_API_URL`). Resolution precedence, highest first:
+
+1. `--api <url>` — explicit URL (flag)
+2. `--env <name>` — named environment (flag)
+3. `PST_API_URL` — explicit URL (env var)
+4. `PST_ENV` — named environment (env var)
+5. default environment (`prod`)
+
+> **Adding an environment** is a one-line entry in `NAMED_ENVIRONMENTS`
+> (`src/prog_strength_tooling/config.py`); the `--env` flag, `PST_ENV`, and CLI
+> help all pick it up automatically.
+
+### Settings
+
 | Setting | Flag | Env var | Default |
 |---|---|---|---|
-| API base URL | `--api` | `PST_API_URL` | `http://localhost:8080` |
+| Environment | `--env` | `PST_ENV` | `prod` |
+| Explicit base URL | `--api` | `PST_API_URL` | _(derived from environment)_ |
 | Admin JWT | `--token` | `PST_TOKEN` | _(none — required)_ |
 
-Flags win over env vars. Export once per shell:
+Export once per shell:
 
 ```bash
-export PST_API_URL=http://localhost:8080
 export PST_TOKEN=eyJhbGciOi...        # your admin JWT
+# optional: target local instead of prod
+export PST_ENV=local
 ```
 
 ## Usage
