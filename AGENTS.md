@@ -67,14 +67,19 @@ Full detail in [`CONTRIBUTING.md`](CONTRIBUTING.md); the essentials:
    the release-driving subject a future semantic-release pipeline reads:
    `feat` → minor, `fix` → patch, `feat!`/`BREAKING CHANGE` → major, everything
    else (`chore`/`docs`/`ci`/`refactor`/`test`) → no release.
-3. **Install the hooks** after cloning so checks run before code leaves your
+3. **Never bump the version by hand.** python-semantic-release derives the
+   version, `CHANGELOG.md`, tag, and GitHub release from the Conventional
+   Commit history on `main` (`feat` → minor, `fix` → patch; stays in `0.x`).
+   It owns `[project].version` and `__version__` — don't edit those or the
+   changelog manually. See [`CONTRIBUTING.md`](CONTRIBUTING.md#releases).
+4. **Install the hooks** after cloning so checks run before code leaves your
    machine:
    ```bash
    uv sync
    uv run pre-commit install --install-hooks
    uv run pre-commit install --hook-type commit-msg --hook-type pre-push
    ```
-4. **The checks** (local pre-commit and CI both enforce these — green before
+5. **The checks** (local pre-commit and CI both enforce these — green before
    merge):
    ```bash
    uv run black --check .   # formatting (black owns it; line length 100)

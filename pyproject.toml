@@ -33,6 +33,11 @@ dev = [
     # Local git hooks (format/lint/commit-msg/tests). See .pre-commit-config.yaml.
     "pre-commit>=3.7",
 ]
+# Release tooling — kept out of the default dev install; only the release
+# workflow needs it (`uv sync --group release`).
+release = [
+    "python-semantic-release>=10,<11",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -53,3 +58,28 @@ target-version = "py312"
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
+
+# Automated versioning via python-semantic-release. Conventional commits on
+# main drive the version bump; PSR updates the version in both files below,
+# regenerates CHANGELOG.md, tags vX.Y.Z, and cuts a GitHub release. No manual
+# version edits — PSR owns [project].version.
+[tool.semantic_release]
+tag_format = "v{version}"
+version_toml = ["pyproject.toml:project.version"]
+version_variables = ["src/prog_strength_tooling/__init__.py:__version__"]
+# Internal operator tool: tag + changelog + GitHub release only, no build or
+# PyPI publish. Empty build command => PSR skips building distributions.
+build_command = ""
+commit_message = "chore(release): v{version} [skip ci]"
+# Author the release commit as the CI bot rather than a human.
+commit_author = "github-actions[bot] <github-actions[bot]@users.noreply.github.com>"
+# Stay in 0.x until the tool is deliberately promoted: a breaking change bumps
+# the minor (0.1 -> 0.2), not to 1.0.0.
+allow_zero_version = true
+major_on_zero = false
+
+[tool.semantic_release.branches.main]
+match = "main"
+
+[tool.semantic_release.changelog]
+exclude_commit_patterns = ["^chore\\(release\\):"]
