@@ -1,0 +1,44 @@
+[project]
+name = "prog-strength-tooling"
+version = "0.1.0"
+description = "Personal Typer CLI for probing queries and maintenance tasks against the prog-strength stack."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [{ name = "Jimmy Wallace" }]
+
+dependencies = [
+    # CLI framework — subcommand groups, flag parsing, help.
+    "typer>=0.12",
+    # HTTP client for the admin endpoints. Same client the agent uses.
+    "httpx>=0.28.1",
+    # Human-friendly tables/panels for the default (non --json) output.
+    "rich>=13.7",
+    # Typed parsing of the API response envelopes / DTOs.
+    "pydantic>=2.7",
+]
+
+[project.scripts]
+pst = "prog_strength_tooling.cli:app"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    # Mocks httpx at the transport layer — same approach as the agent repo.
+    "respx>=0.21",
+    "ruff>=0.6",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/prog_strength_tooling"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
