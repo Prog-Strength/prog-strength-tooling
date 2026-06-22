@@ -1,0 +1,53 @@
+# Local git hooks that vet changes before they leave your machine.
+#
+# Install once after cloning:
+#   uv run pre-commit install --install-hooks
+#   uv run pre-commit install --hook-type commit-msg --hook-type pre-push
+#
+# Stages:
+#   commit    -> formatting + lint (black, ruff) on the staged files
+#   commit-msg-> conventional-commit message check
+#   pre-push  -> the full test suite (so you don't push red)
+default_install_hook_types: [pre-commit, commit-msg, pre-push]
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-added-large-files
+      - id: check-merge-conflict
+
+  # Formatting (owner's preference). Reads [tool.black] from pyproject.toml.
+  - repo: https://github.com/psf/black
+    rev: 26.5.1
+    hooks:
+      - id: black
+
+  # Lint only — black handles formatting. Reads [tool.ruff] from pyproject.toml.
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.18
+    hooks:
+      - id: ruff
+        args: [--fix]
+
+  # Enforce Conventional Commits so semantic-release can derive versions.
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v4.4.0
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]
+
+  # Run the test suite before a push. system language => uses the project venv.
+  - repo: local
+    hooks:
+      - id: pytest
+        name: pytest
+        entry: uv run pytest
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]

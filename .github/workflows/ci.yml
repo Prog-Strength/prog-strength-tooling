@@ -1,0 +1,56 @@
+name: CI
+
+# Mirrors the local pre-commit checks (format, lint, tests) so a PR cannot
+# merge to the main release branch with changes that wouldn't pass locally.
+# Also enforces the Conventional-Commits PR title that drives semantic-release.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: format · lint · test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Sync dependencies
+        run: uv sync --frozen
+
+      - name: black (format check)
+        run: uv run black --check .
+
+      - name: ruff (lint)
+        run: uv run ruff check .
+
+      - name: pytest
+        run: uv run pytest
+
+  pr-title:
+    name: conventional PR title
+    # The repo squash-merges, so the PR title becomes the commit subject on
+    # main that semantic-release reads. Enforce it like the agent repo does.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    steps:
+      - name: Validate PR title is a Conventional Commit
+        uses: amannn/action-semantic-pull-request@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

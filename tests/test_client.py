@@ -17,9 +17,7 @@ def _cfg(token="admin-jwt"):
 
 
 def _ok(data):
-    return httpx.Response(
-        200, json={"service": "api", "version": "1", "message": "", "data": data}
-    )
+    return httpx.Response(200, json={"service": "api", "version": "1", "message": "", "data": data})
 
 
 def test_missing_token_raises_before_any_request():

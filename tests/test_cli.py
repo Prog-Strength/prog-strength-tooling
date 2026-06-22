@@ -12,9 +12,7 @@ ENV = {"PST_API_URL": BASE, "PST_TOKEN": "admin-jwt"}
 
 
 def _ok(data):
-    return httpx.Response(
-        200, json={"service": "api", "version": "1", "message": "", "data": data}
-    )
+    return httpx.Response(200, json={"service": "api", "version": "1", "message": "", "data": data})
 
 
 @respx.mock
@@ -69,9 +67,7 @@ def test_memory_search_json_output():
 
 def test_missing_token_exits_1(monkeypatch):
     monkeypatch.delenv("PST_TOKEN", raising=False)
-    result = runner.invoke(
-        app, ["memory", "list", "--user", "u1"], env={"PST_API_URL": BASE}
-    )
+    result = runner.invoke(app, ["memory", "list", "--user", "u1"], env={"PST_API_URL": BASE})
     assert result.exit_code == 1
     assert "token" in result.output.lower()
 
