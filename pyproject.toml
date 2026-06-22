@@ -1,6 +1,6 @@
 [project]
 name = "prog-strength-tooling"
-version = "0.1.0"
+version = "0.2.0"
 description = "Personal Typer CLI for probing queries and maintenance tasks against the prog-strength stack."
 readme = "README.md"
 requires-python = ">=3.12"
