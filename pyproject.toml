@@ -16,6 +16,9 @@ dependencies = [
     "rich>=13.7",
     # Typed parsing of the API response envelopes / DTOs.
     "pydantic>=2.7",
+    # CloudWatch Logs access for `pst logs`. Imported lazily inside the query
+    # path so commands that never touch AWS don't pay its import cost.
+    "boto3>=1.35",
 ]
 
 [project.scripts]

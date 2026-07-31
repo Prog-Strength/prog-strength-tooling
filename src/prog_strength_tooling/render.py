@@ -16,6 +16,7 @@ from rich.text import Text
 
 from .config import Environment
 from .health import ServiceStatus
+from .logparse import LogRecord
 from .models import MemoryList, SearchResult
 
 console = Console()
@@ -144,3 +145,136 @@ def render_status(environment: Environment, results: list[ServiceStatus], *, as_
         latency = f"{r.latency_ms:.0f} ms" if r.latency_ms is not None else "-"
         table.add_row(r.name, status, r.version or "-", latency, r.url)
     console.print(table)
+
+
+#: Level -> rich style for the logs table. Anything unlisted (including the
+#: "-" of an unparsed line) renders unstyled.
+_LEVEL_STYLES = {
+    "CRITICAL": "bold red",
+    "FATAL": "bold red",
+    "ERROR": "red",
+    "WARN": "yellow",
+    "WARNING": "yellow",
+    "INFO": "green",
+    "DEBUG": "dim",
+    "TRACE": "dim",
+}
+
+
+def _fmt_log_ts(value) -> str:
+    """Millisecond-precision UTC stamp — ordering within a request matters."""
+    return value.strftime("%m-%d %H:%M:%S.%f")[:-3]
+
+
+def render_logs(
+    records: list[LogRecord],
+    *,
+    request_id: str,
+    environment: str,
+    window_description: str,
+    counts: dict[str, int],
+    truncated: bool,
+    limit: int,
+    as_json: bool,
+    raw: bool,
+) -> None:
+    """Render the merged, time-ordered timeline for one request id.
+
+    Log bodies are rendered as rich Text, never markup: a log line containing
+    something like "[/dim]" or an unbalanced bracket is ordinary content here
+    and must not be interpreted as styling (or crash the render).
+    """
+    if as_json:
+        console.print_json(
+            json.dumps(
+                {
+                    "request_id": request_id,
+                    "environment": environment,
+                    "window": window_description,
+                    "counts": counts,
+                    "truncated": truncated,
+                    "records": [
+                        {
+                            "service": r.service,
+                            "timestamp": r.timestamp.isoformat(),
+                            "level": r.level,
+                            "logger": r.logger,
+                            "message": r.message,
+                            "stream": r.stream,
+                            "raw": r.raw,
+                        }
+                        for r in records
+                    ],
+                }
+            )
+        )
+        return
+
+    if not records:
+        render_no_logs(
+            request_id=request_id,
+            searched=list(counts),
+            window_description=window_description,
+        )
+        return
+
+    breakdown = "  ".join(f"{service} {counts.get(service, 0)}" for service in counts)
+    console.print(
+        f"[bold]request_id[/bold] [magenta]{request_id}[/magenta]  "
+        f"[dim]{environment} · {window_description} · {breakdown}[/dim]"
+    )
+
+    if raw:
+        for r in records:
+            line = Text()
+            line.append(f"{_fmt_log_ts(r.timestamp)} ", style="dim")
+            line.append(f"{r.service:<5} ", style="cyan")
+            line.append(r.raw)
+            console.print(line, highlight=False)
+    else:
+        table = Table(title=f"log lines ({len(records)})")
+        table.add_column("time (UTC)", style="dim", no_wrap=True)
+        table.add_column("service", style="cyan", no_wrap=True)
+        table.add_column("level", no_wrap=True)
+        table.add_column("message", style="white", overflow="fold")
+
+        for r in records:
+            body = Text()
+            if r.logger:
+                body.append(f"{r.logger} ", style="dim")
+            body.append(r.message)
+            table.add_row(
+                _fmt_log_ts(r.timestamp),
+                r.service,
+                Text(r.level, style=_LEVEL_STYLES.get(r.level.upper(), "")),
+                body,
+            )
+        console.print(table)
+
+    if truncated:
+        err_console.print(
+            f"[yellow]note:[/yellow] output truncated at --limit {limit}; "
+            f"more matching lines exist. Raise --limit or narrow the window."
+        )
+
+
+def render_no_logs(*, request_id: str, searched: list[str], window_description: str) -> None:
+    """Explain an empty result and what to try next.
+
+    A bare 'no results' can't distinguish 'too narrow a window' from 'wrong
+    service' from 'mistyped id' — and all three are common enough that the
+    operator shouldn't have to guess which one they hit.
+    """
+    groups = ", ".join(searched) if searched else "any service"
+    console.print(
+        f"[dim]no lines matching[/dim] [magenta]{request_id}[/magenta] "
+        f"[dim]in {groups} over the {window_description}[/dim]"
+    )
+    console.print(
+        "\n  · widen the window — [cyan]--since 7d[/cyan] "
+        "[dim](CloudWatch retains 30 days)[/dim]"
+        "\n  · request ids don't propagate between services: only the service the "
+        "client\n    actually called will have the id"
+        "\n  · confirm the id was copied whole from the response body's "
+        "[cyan]request_id[/cyan]\n    or the [cyan]X-Request-ID[/cyan] header"
+    )

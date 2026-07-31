@@ -55,6 +55,24 @@ DEFAULT_ENVIRONMENT = "prod"
 ENV_API_URL = "PST_API_URL"
 ENV_ENV = "PST_ENV"
 ENV_TOKEN = "PST_TOKEN"
+ENV_AWS_PROFILE = "PST_AWS_PROFILE"
+
+#: Region hosting the CloudWatch log groups (prog-strength-infra deploys the
+#: whole stack to us-east-2). Pinned rather than left to the AWS default
+#: chain: an operator's default region is often us-east-1, and querying the
+#: wrong region returns an empty result rather than an error — silence that
+#: looks exactly like "this request id doesn't exist".
+AWS_REGION = "us-east-2"
+
+#: Log groups are named /prog-strength/<service> by prog-strength-infra's
+#: modules/logging, one per docker-compose service shipping via the awslogs
+#: driver. The same naming rule applies to any service added there later.
+LOG_GROUP_PREFIX = "/prog-strength"
+
+#: Environments whose services ship logs to CloudWatch. Local containers log
+#: to stdout only, so there is nothing to query — the logs command says so
+#: rather than returning a confusing empty result.
+CLOUDWATCH_ENVIRONMENTS = frozenset({"prod"})
 
 
 #: Shown whenever an admin-gated command runs without a token. It answers both
@@ -154,6 +172,63 @@ def resolve(api: str | None, token: str | None, env: str | None = None) -> Confi
     )
     resolved_token = token or os.getenv(ENV_TOKEN) or None
     return Config(api_url=api_url, token=resolved_token)
+
+
+@dataclass(frozen=True)
+class LogsConfig:
+    """Resolved settings for a CloudWatch log query."""
+
+    environment: str
+    region: str
+    #: AWS named profile, or None to use boto3's default credential chain.
+    profile: str | None
+    #: Service name -> log group name, in SERVICES display order.
+    log_groups: dict[str, str]
+
+
+def log_group_for(service: str) -> str:
+    """Log group name for a service, per the infra naming convention."""
+    return f"{LOG_GROUP_PREFIX}/{service}"
+
+
+def resolve_logs(
+    env: str | None,
+    services: list[str] | tuple[str, ...] | None = None,
+    profile: str | None = None,
+    region: str | None = None,
+) -> LogsConfig:
+    """Resolve which log groups to query, in which region, as whom.
+
+    Unlike the memory commands this needs no admin JWT — CloudWatch is reached
+    with the operator's own AWS credentials, not the API's auth. (The EC2
+    instance role is deliberately write-only; reads are an operator action.)
+
+    Raises ConfigError for an environment that ships no logs, or an unknown
+    service name, so both fail before any AWS call goes out.
+    """
+    environment = resolve_environment(env)
+    if environment.name not in CLOUDWATCH_ENVIRONMENTS:
+        shippers = ", ".join(sorted(CLOUDWATCH_ENVIRONMENTS))
+        raise ConfigError(
+            f"environment {environment.name!r} does not ship logs to CloudWatch "
+            f"(only: {shippers}). Local containers log to stdout — "
+            f"use `docker compose logs` instead."
+        )
+
+    selected = tuple(services) if services else SERVICES
+    unknown = [s for s in selected if s not in SERVICES]
+    if unknown:
+        valid = ", ".join(SERVICES)
+        raise ConfigError(f"unknown service {unknown[0]!r}. Valid: {valid}.")
+
+    # Preserve SERVICES order regardless of flag order, so output is stable.
+    chosen = set(selected)
+    return LogsConfig(
+        environment=environment.name,
+        region=region or AWS_REGION,
+        profile=profile or os.getenv(ENV_AWS_PROFILE) or None,
+        log_groups={s: log_group_for(s) for s in SERVICES if s in chosen},
+    )
 
 
 def resolve_admin(api: str | None, token: str | None, env: str | None = None) -> Config:

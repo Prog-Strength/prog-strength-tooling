@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import typer
 
-from .commands import memory, status
+from .commands import logs, memory, status
 
 # Typer collapses single newlines within a paragraph but preserves blank-line
 # paragraph breaks, so each example is its own paragraph to keep it on one line.
@@ -22,7 +22,7 @@ maintenance against a chosen [bold]environment[/bold]. Commands default to \
 target another.
 
 [dim]Health checks need no auth; the memory commands need an admin token \
-([cyan]PST_TOKEN[/cyan]).[/dim]"""
+([cyan]PST_TOKEN[/cyan]); the log commands use your AWS credentials.[/dim]"""
 
 EPILOG = """[bold]Examples[/bold]
 
@@ -32,10 +32,12 @@ EPILOG = """[bold]Examples[/bold]
 
 [cyan]pst memory search --user ID --query "leg day"[/cyan] — what it would recall
 
+[cyan]pst logs trace REQUEST_ID[/cyan] — server-side logs for a client's failed call
+
 [dim]Environments: prod (default) · local — select with --env or PST_ENV.[/dim]
 
-[dim]Env vars: PST_ENV · PST_TOKEN (admin JWT, memory only) · PST_API_URL. \
-Run 'pst COMMAND --help' for per-command options.[/dim]"""
+[dim]Env vars: PST_ENV · PST_TOKEN (admin JWT, memory only) · PST_API_URL · \
+PST_AWS_PROFILE (logs only). Run 'pst COMMAND --help' for per-command options.[/dim]"""
 
 app = typer.Typer(
     no_args_is_help=True,
@@ -45,6 +47,7 @@ app = typer.Typer(
 )
 
 app.add_typer(memory.app, name="memory")
+app.add_typer(logs.app, name="logs")
 app.command("status")(status.status)
 
 
