@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v0.6.0 (2026-07-31)
+
+### Features
+
+- **logging**: Add info/debug logging and fix whoop doctor's double scan
+  ([#8](https://github.com/Prog-Strength/prog-strength-tooling/pull/8),
+  [`3e4a555`](https://github.com/Prog-Strength/prog-strength-tooling/commit/3e4a555e76524d75162b058f2f6909c76d6e0f11))
+
+
 ## v0.5.0 (2026-07-31)
 
 ### Features
