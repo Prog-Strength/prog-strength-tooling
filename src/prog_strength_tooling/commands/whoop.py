@@ -124,7 +124,11 @@ def doctor(
     try:
         # The log checks are non-negotiable, so their config/window errors are
         # fatal (exit 2) — same shape as logs.py.
-        cfg_logs = resolve_logs(env, None, profile, region)
+        # Only the api group is ever scanned (whooplogs.scan reads it alone), so
+        # name it explicitly rather than letting resolve_logs default to all
+        # three — otherwise the config line advertises agent and mcp too, and
+        # contradicts the "scanning /prog-strength/api" line right below it.
+        cfg_logs = resolve_logs(env, ("api",), profile, region)
         window = resolve(since or DEFAULT_SINCE, None, None)
         scan = whooplogs.scan(cfg_logs, window, max_events)
     except (ConfigError, WindowError, cloudwatch.CloudWatchError) as exc:

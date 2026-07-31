@@ -92,15 +92,19 @@ def build_client(cfg: LogsConfig):
     `pst --help` don't pay its import cost (a few hundred ms) for commands
     that never touch AWS.
     """
+    # Logged BEFORE the import and the Session: `import boto3` costs a few
+    # hundred ms and Session construction is what reads ~/.aws/config and can
+    # stall on credential resolution, so a line emitted afterwards would be
+    # invisible for exactly the interval worth seeing.
+    log.debug(
+        "building AWS client %s",
+        kv(profile=cfg.profile or "default-chain", region=cfg.region),
+    )
     import boto3
     from botocore.exceptions import BotoCoreError, ProfileNotFound
 
     try:
         session = boto3.Session(profile_name=cfg.profile, region_name=cfg.region)
-        log.debug(
-            "building AWS client %s",
-            kv(profile=cfg.profile or "default-chain", region=cfg.region),
-        )
         return session.client("logs")
     except ProfileNotFound as exc:
         raise CloudWatchError(

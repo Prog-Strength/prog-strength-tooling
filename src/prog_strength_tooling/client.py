@@ -50,6 +50,13 @@ def _request(client: httpx.Client, method: str, path: str, **kwargs) -> httpx.Re
     "path" themselves — but it would raise TypeError if a future caller ever
     added a query param literally named "method" or "path".
     """
+    # Announced at INFO, before the call, and carrying the timeout: a command
+    # stuck inside httpx prints nothing else until the request returns, so
+    # without this line the default level leaves an operator with no idea it is
+    # sitting in an HTTP call at all — the exact complaint this logging exists
+    # to answer. The timeout bounds the wait, distinguishing "hung forever"
+    # from "will give up in 30s".
+    log.info("%s %s %s", method, path, kv(timeout_s=getattr(client.timeout, "read", None)))
     log.debug("request %s", kv(method=method, path=path, **kwargs.get("params", {}) or {}))
     start = time.monotonic()
     try:
