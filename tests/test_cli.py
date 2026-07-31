@@ -1,5 +1,7 @@
 """End-to-end CLI tests via Typer's runner, with the HTTP layer mocked."""
 
+import re
+
 import httpx
 import respx
 from typer.testing import CliRunner
@@ -9,6 +11,14 @@ from prog_strength_tooling.cli import app
 runner = CliRunner()
 BASE = "http://api.test"
 ENV = {"PST_API_URL": BASE, "PST_TOKEN": "admin-jwt"}
+
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _plain(text: str) -> str:
+    """Strip ANSI colour so help-text assertions don't depend on whether the
+    runner (locally) or CI (FORCE_COLOR) renders rich output with escapes."""
+    return _ANSI.sub("", text)
 
 
 def _ok(data):
@@ -109,3 +119,35 @@ def test_no_args_shows_help():
     result = runner.invoke(app, [])
     assert result.exit_code == 2
     assert "memory" in result.output
+
+
+def test_root_help_still_shows_the_app_description():
+    result = runner.invoke(app, ["--help"])
+    assert result.exit_code == 0
+    out = _plain(result.output)
+    assert "CLI tooling for Prog Strength Backend" in out
+    assert "--verbose" in out
+    assert "--quiet" in out
+
+
+def test_verbose_flag_is_accepted_before_a_subcommand():
+    result = runner.invoke(app, ["-v", "status", "--help"])
+    assert result.exit_code == 0
+
+
+def test_verbose_flag_sets_the_debug_level():
+    import logging
+
+    from prog_strength_tooling import logsetup
+
+    runner.invoke(app, ["-v", "status", "--help"])
+    assert logging.getLogger(logsetup.ROOT_LOGGER).level == logging.DEBUG
+
+
+def test_quiet_flag_sets_the_warning_level():
+    import logging
+
+    from prog_strength_tooling import logsetup
+
+    runner.invoke(app, ["-q", "status", "--help"])
+    assert logging.getLogger(logsetup.ROOT_LOGGER).level == logging.WARNING
