@@ -5,6 +5,8 @@ Two commands:
   search  retrieval probe — what the agent would recall (POST /admin/memories/search)
 
 Both hit admin-gated endpoints; supply an admin JWT via --token or PST_TOKEN.
+Both resolve config through config.resolve_admin, so a missing token stops the
+command up front with instructions rather than as a 401 from the server.
 """
 
 from __future__ import annotations
@@ -12,8 +14,14 @@ from __future__ import annotations
 import typer
 
 from ..client import APIError, ClientError, MemoryClient
-from ..config import DEFAULT_ENVIRONMENT, NAMED_ENVIRONMENTS, ConfigError, resolve
-from ..render import err_console, render_memories, render_search
+from ..config import (
+    DEFAULT_ENVIRONMENT,
+    NAMED_ENVIRONMENTS,
+    ConfigError,
+    MissingTokenError,
+    resolve_admin,
+)
+from ..render import err_console, render_memories, render_missing_token, render_search
 
 app = typer.Typer(
     no_args_is_help=True,
@@ -36,13 +44,26 @@ ApiOption = typer.Option(
     help="Explicit API base URL, overrides --env (or PST_API_URL).",
     show_default=False,
 )
-TokenOption = typer.Option(None, "--token", help="Admin JWT (or PST_TOKEN).", show_default=False)
+TokenOption = typer.Option(
+    None,
+    "--token",
+    help="Admin JWT — required (or PST_TOKEN).",
+    show_default=False,
+)
 JsonOption = typer.Option(False, "--json", help="Emit raw JSON instead of a table.")
 
 
 def _fail(exc: Exception) -> None:
-    """Print a one-line error to stderr and exit 1."""
-    err_console.print(f"[red]error:[/red] {exc}")
+    """Print the error to stderr and exit 1.
+
+    A missing token gets the full multi-line panel (it's the one failure an
+    operator hits cold and needs instructions for); everything else stays a
+    one-liner.
+    """
+    if isinstance(exc, MissingTokenError):
+        render_missing_token(str(exc))
+    else:
+        err_console.print(f"[red]error:[/red] {exc}")
     raise typer.Exit(code=1)
 
 
@@ -58,7 +79,7 @@ def list_memories(
 ) -> None:
     """List the vector memories stored for a user."""
     try:
-        cfg = resolve(api, token, env)
+        cfg = resolve_admin(api, token, env)
         with MemoryClient(cfg) as client:
             result = client.list_memories(user, limit=limit, offset=offset)
     except (ConfigError, ClientError, APIError) as exc:
@@ -85,7 +106,7 @@ def search(
 ) -> None:
     """Run a retrieval probe — the same path the agent uses to recall."""
     try:
-        cfg = resolve(api, token, env)
+        cfg = resolve_admin(api, token, env)
         with MemoryClient(cfg) as client:
             result = client.search(user, query, k=k, threshold=threshold)
     except (ConfigError, ClientError, APIError) as exc:

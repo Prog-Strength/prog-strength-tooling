@@ -6,7 +6,9 @@ import pytest
 from prog_strength_tooling.config import (
     NAMED_ENVIRONMENTS,
     ConfigError,
+    MissingTokenError,
     resolve,
+    resolve_admin,
 )
 
 PROD = NAMED_ENVIRONMENTS["prod"]["api"]
@@ -83,6 +85,46 @@ def test_token_from_flag_and_env(monkeypatch):
 def test_base_url_strips_trailing_slash():
     cfg = resolve(api="http://api.example.com/", token="t")
     assert cfg.base_url == "http://api.example.com"
+
+
+# --- resolve_admin (the token gate on admin-only commands) --------------
+
+
+def test_resolve_admin_requires_a_token():
+    with pytest.raises(MissingTokenError):
+        resolve_admin(api=None, token=None)
+
+
+def test_missing_token_error_is_a_config_error():
+    # Command handlers catch ConfigError; the gate must not slip past them.
+    with pytest.raises(ConfigError):
+        resolve_admin(api=None, token=None)
+
+
+def test_missing_token_message_says_how_to_supply_and_obtain_one():
+    with pytest.raises(MissingTokenError) as exc:
+        resolve_admin(api=None, token=None)
+    message = str(exc.value)
+    assert "PST_TOKEN" in message  # how to supply it
+    assert "--token" in message
+    assert "admin allowlist" in message  # what kind of token
+    assert "/auth/dev/token" in message  # how to obtain one
+
+
+def test_resolve_admin_accepts_flag_or_env_token(monkeypatch):
+    assert resolve_admin(api=None, token="flag-tok").token == "flag-tok"
+    monkeypatch.setenv("PST_TOKEN", "env-tok")
+    cfg = resolve_admin(api=None, token=None, env="local")
+    assert cfg.token == "env-tok"
+    assert cfg.api_url == LOCAL  # still follows the normal URL precedence
+
+
+def test_resolve_admin_reports_unknown_env_before_missing_token():
+    # A bad --env is the more specific error; don't mask it with the token gate.
+    with pytest.raises(ConfigError) as exc:
+        resolve_admin(api=None, token=None, env="nope")
+    assert not isinstance(exc.value, MissingTokenError)
+    assert "nope" in str(exc.value)
 
 
 # --- resolve_environment (used by `pst status`) -------------------------

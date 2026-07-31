@@ -19,6 +19,11 @@ is the single source of truth and stays testable without the CLI.
 
 The token has no default: the admin endpoints are gated, so a missing token is
 surfaced as a clear error at call time rather than guessed.
+
+Commands that hit an admin-gated endpoint call `resolve_admin` instead of
+`resolve`, which fails fast with MISSING_TOKEN_MESSAGE before any request is
+made. The check lives here so every current and future admin command gets the
+same up-front error, and so the guidance text has one home.
 """
 
 from __future__ import annotations
@@ -52,8 +57,44 @@ ENV_ENV = "PST_ENV"
 ENV_TOKEN = "PST_TOKEN"
 
 
+#: Shown whenever an admin-gated command runs without a token. It answers both
+#: questions an operator returning to the CLI has — how do I pass a token, and
+#: where do I get one — so the failure is self-service. Keep lines under ~72
+#: chars: they render inside a bordered panel on an 80-col terminal.
+MISSING_TOKEN_MESSAGE = f"""\
+This command calls the admin-gated API endpoints, so it needs a Prog
+Strength admin token: a normal user JWT whose email is in the API's
+admin allowlist (the same token memctl uses).
+
+Supply one, either way:
+
+  export {ENV_TOKEN}=<admin-jwt>     once per shell
+  pst ... --token <admin-jwt>      per command
+
+Don't have one? Get a JWT for an allowlisted account:
+
+  prod    sign in to the Prog Strength web app as an admin, then copy
+          localStorage.ps_access_token from the browser devtools.
+
+  local   with DEV_AUTH=true on the api:
+          curl -sX POST {NAMED_ENVIRONMENTS["local"]["api"]}/auth/dev/token \\
+               -H 'Content-Type: application/json' \\
+               -d '{{"email": "you@example.com"}}'"""
+
+
 class ConfigError(Exception):
     """Invalid configuration, e.g. an unknown environment name."""
+
+
+class MissingTokenError(ConfigError):
+    """An admin-gated command ran with no token from flag or env.
+
+    A ConfigError subclass so existing command-level handlers catch it; the
+    CLI renders it specially because the guidance is multi-line.
+    """
+
+    def __init__(self, message: str = MISSING_TOKEN_MESSAGE) -> None:
+        super().__init__(message)
 
 
 @dataclass(frozen=True)
@@ -113,3 +154,16 @@ def resolve(api: str | None, token: str | None, env: str | None = None) -> Confi
     )
     resolved_token = token or os.getenv(ENV_TOKEN) or None
     return Config(api_url=api_url, token=resolved_token)
+
+
+def resolve_admin(api: str | None, token: str | None, env: str | None = None) -> Config:
+    """resolve() for admin-gated commands — no token is a hard, up-front error.
+
+    Every command that hits an admin endpoint resolves through here, so the
+    operator learns a token is required (and how to get one) before a request
+    goes out, instead of via a 401 from the server.
+    """
+    cfg = resolve(api, token, env)
+    if not cfg.token:
+        raise MissingTokenError()
+    return cfg

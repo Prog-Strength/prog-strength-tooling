@@ -14,7 +14,7 @@ from .commands import memory, status
 
 # Typer collapses single newlines within a paragraph but preserves blank-line
 # paragraph breaks, so each example is its own paragraph to keep it on one line.
-HELP = """[bold]pst[/bold] — operator CLI for the Prog Strength backend.
+HELP = """[bold]pst[/bold] — CLI tooling for Prog Strength Backend (API, Agent, MCP, DB).
 
 Probe live services, inspect the agent's vector memory, and run routine \
 maintenance against a chosen [bold]environment[/bold]. Commands default to \

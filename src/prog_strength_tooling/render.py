@@ -10,7 +10,9 @@ import json
 from dataclasses import asdict
 
 from rich.console import Console
+from rich.panel import Panel
 from rich.table import Table
+from rich.text import Text
 
 from .config import Environment
 from .health import ServiceStatus
@@ -89,6 +91,25 @@ def render_search(result: SearchResult, *, as_json: bool) -> None:
             _fmt_dt(hit.created_at),
         )
     console.print(table)
+
+
+def render_missing_token(message: str) -> None:
+    """Render the 'no admin token' error as a bordered, hard-to-miss block.
+
+    A panel rather than a one-liner because this is the one error an operator
+    hits cold — the message includes how to supply a token and how to get one,
+    and it must survive being skimmed. Rendered as plain Text so JSON/JWT
+    punctuation in the examples isn't read as rich markup.
+    """
+    err_console.print(
+        Panel(
+            Text(message),
+            title="[bold red]missing admin token[/bold red]",
+            title_align="left",
+            border_style="red",
+        ),
+        highlight=False,
+    )
 
 
 def _print_json(model) -> None:

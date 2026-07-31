@@ -29,6 +29,23 @@ uv tool install --editable .
 The admin endpoints are gated: you need an **admin JWT** — a normal user token
 whose email is in the API's admin allowlist (the same token `memctl` uses).
 
+### Getting an admin token
+
+Every command that hits an admin endpoint (today: all of `pst memory`) checks
+for a token **before** making a request and stops with instructions if there
+isn't one — you never get a bare `401`. `pst status` needs no token; health
+endpoints are public.
+
+| Environment | How to get a JWT |
+|---|---|
+| `prod` | Sign in to the Prog Strength web app as an admin, then copy `localStorage.ps_access_token` from the browser devtools. |
+| `local` | With `DEV_AUTH=true` on the api: `curl -sX POST http://localhost:8080/auth/dev/token -H 'Content-Type: application/json' -d '{"email": "you@example.com"}'` |
+
+Then supply it with `export PST_TOKEN=<admin-jwt>` (once per shell) or
+`--token <admin-jwt>` (per command). Tokens expire — a `403` from the server
+means the account isn't on the allowlist, a `401` means the JWT is stale, so
+get a fresh one.
+
 ### Picking an environment
 
 Service URLs come from a registry of **named environments**, each mapping the

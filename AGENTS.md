@@ -46,7 +46,11 @@ Python sibling of the Go `memctl` in `prog-strength-api` (the two coexist;
   (or `PST_ENV`) targets a local API; `--api <url>` is a one-off override.
 - **Auth** is an **admin JWT** — a normal user token whose email is in the
   API's admin allowlist — supplied via `--token` or `PST_TOKEN`. Never hardcode
-  or commit a token.
+  or commit a token. Commands that hit an admin endpoint resolve config through
+  `config.resolve_admin`, which raises `MissingTokenError` (rendered as the
+  `missing admin token` panel) before any request goes out — use it, not
+  `config.resolve`, for any new admin-gated command. Public-endpoint commands
+  like `pst status` stay token-free.
 
 ```bash
 pst status                                    # are api/agent/mcp up? what versions? (no token)

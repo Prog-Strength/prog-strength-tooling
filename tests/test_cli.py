@@ -65,11 +65,43 @@ def test_memory_search_json_output():
     assert "0.7" in result.stdout
 
 
-def test_missing_token_exits_1(monkeypatch):
+@respx.mock
+def test_missing_token_fails_before_any_request(monkeypatch):
     monkeypatch.delenv("PST_TOKEN", raising=False)
+    route = respx.get(f"{BASE}/admin/memories").mock(return_value=_ok({"memories": []}))
+
     result = runner.invoke(app, ["memory", "list", "--user", "u1"], env={"PST_API_URL": BASE})
+
     assert result.exit_code == 1
-    assert "token" in result.output.lower()
+    assert not route.called  # gated up front, not by a 401 from the server
+    out = result.output
+    assert "missing admin token" in out
+    assert "PST_TOKEN" in out and "--token" in out  # how to supply one
+    assert "auth/dev/token" in out  # how to obtain one
+
+
+@respx.mock
+def test_missing_token_gates_search_too(monkeypatch):
+    monkeypatch.delenv("PST_TOKEN", raising=False)
+    route = respx.post(f"{BASE}/admin/memories/search").mock(
+        return_value=_ok({"threshold": 0.7, "matches": []})
+    )
+
+    result = runner.invoke(
+        app, ["memory", "search", "--user", "u1", "--query", "bench"], env={"PST_API_URL": BASE}
+    )
+
+    assert result.exit_code == 1
+    assert not route.called
+    assert "missing admin token" in result.output
+
+
+def test_status_needs_no_token(monkeypatch):
+    # Health endpoints are public — the token gate must not spread to status.
+    monkeypatch.delenv("PST_TOKEN", raising=False)
+    result = runner.invoke(app, ["status", "--help"])
+    assert result.exit_code == 0
+    assert "missing admin token" not in result.output
 
 
 def test_no_args_shows_help():
