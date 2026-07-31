@@ -14,6 +14,10 @@ import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
+from .logsetup import get_logger, kv
+
+log = get_logger(__name__)
+
 #: Duration suffixes accepted by --since, in seconds.
 _UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
 
@@ -107,7 +111,13 @@ def resolve(
         resolved_start = _as_utc(start) if start else resolved_end - timedelta(hours=24)
         if resolved_start >= resolved_end:
             raise WindowError("--start must be earlier than --end.")
+        log.info(
+            "window %s",
+            kv(start=resolved_start.isoformat(), end=resolved_end.isoformat(), since=None),
+        )
         return Window(start=resolved_start, end=resolved_end, since=None)
 
     spec = since or "24h"
-    return Window(start=now - parse_duration(spec), end=now, since=spec)
+    start = now - parse_duration(spec)
+    log.info("window %s", kv(since=spec, start=start.isoformat(), end=now.isoformat()))
+    return Window(start=start, end=now, since=spec)

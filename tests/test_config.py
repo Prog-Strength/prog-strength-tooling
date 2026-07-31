@@ -9,6 +9,7 @@ from prog_strength_tooling.config import (
     MissingTokenError,
     resolve,
     resolve_admin,
+    resolve_logs,
 )
 
 PROD = NAMED_ENVIRONMENTS["prod"]["api"]
@@ -152,3 +153,27 @@ def test_resolve_environment_unknown_raises():
 
     with pytest.raises(ConfigError):
         resolve_environment("staging")
+
+
+def test_resolve_logs_logs_the_environment_at_info(caplog):
+    import logging
+
+    with caplog.at_level(logging.INFO, logger="prog_strength_tooling"):
+        resolve_logs("prod", None, "my-profile", None)
+
+    line = " ".join(r.getMessage() for r in caplog.records)
+    assert "env=prod" in line
+    assert "region=us-east-2" in line
+    assert "profile=my-profile" in line
+
+
+def test_resolve_admin_never_logs_the_token(caplog):
+    import logging
+
+    secret = "eyJhbGciOiJIUzI1NiJ9.super-secret-payload.signature"
+    with caplog.at_level(logging.DEBUG, logger="prog_strength_tooling"):
+        resolve_admin(None, secret, "prod")
+
+    for record in caplog.records:
+        assert secret not in record.getMessage()
+        assert "super-secret-payload" not in record.getMessage()

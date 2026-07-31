@@ -85,3 +85,15 @@ def test_epoch_millisecond_conversion():
     window = resolve(None, datetime(2026, 7, 29, tzinfo=UTC), NOW, now=NOW)
     assert window.start_ms == int(datetime(2026, 7, 29, tzinfo=UTC).timestamp() * 1000)
     assert window.end_ms == int(NOW.timestamp() * 1000)
+
+
+def test_resolve_logs_the_absolute_window_at_info(caplog):
+    import logging
+
+    with caplog.at_level(logging.INFO, logger="prog_strength_tooling"):
+        resolve("7d", None, None)
+
+    line = " ".join(r.getMessage() for r in caplog.records)
+    assert "since=7d" in line
+    assert "start=" in line
+    assert "end=" in line
