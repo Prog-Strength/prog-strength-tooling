@@ -82,7 +82,7 @@ def validate_request_id(request_id: str) -> str:
     return cleaned
 
 
-def _build_client(cfg: LogsConfig):
+def build_client(cfg: LogsConfig):
     """Create a CloudWatch Logs client, translating setup failures.
 
     boto3 is imported lazily so that `pst status`, `pst memory`, and even
@@ -104,7 +104,7 @@ def _build_client(cfg: LogsConfig):
         raise CloudWatchError(f"could not initialize an AWS client: {exc}") from exc
 
 
-def _describe_failure(exc: Exception, group: str, cfg: LogsConfig) -> str:
+def describe_failure(exc: Exception, group: str, cfg: LogsConfig) -> str:
     """Turn a botocore exception into something an operator can act on."""
     from botocore.exceptions import ClientError, NoCredentialsError, PartialCredentialsError
 
@@ -197,7 +197,7 @@ def search(cfg: LogsConfig, request_id: str, window: Window, limit: int) -> Sear
     """
     from botocore.exceptions import BotoCoreError, ClientError
 
-    client = _build_client(cfg)
+    client = build_client(cfg)
     groups = list(cfg.log_groups.items())
 
     def run(item: tuple[str, str]) -> tuple[str, list[LogRecord]]:
@@ -205,7 +205,7 @@ def search(cfg: LogsConfig, request_id: str, window: Window, limit: int) -> Sear
         try:
             return service, _search_group(client, service, group, request_id, window, limit)
         except (ClientError, BotoCoreError) as exc:
-            raise CloudWatchError(_describe_failure(exc, group, cfg)) from exc
+            raise CloudWatchError(describe_failure(exc, group, cfg)) from exc
 
     # boto3 clients are safe to call from multiple threads; only creating them
     # is not, and that already happened above.

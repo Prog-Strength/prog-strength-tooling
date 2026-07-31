@@ -45,7 +45,7 @@ def stubbed(monkeypatch):
     )
     stubber = Stubber(client)
     stubber.activate()
-    monkeypatch.setattr(cloudwatch, "_build_client", lambda cfg: client)
+    monkeypatch.setattr(cloudwatch, "build_client", lambda cfg: client)
     yield stubber
     stubber.deactivate()
 
@@ -76,7 +76,7 @@ def fake_client(monkeypatch):
 
     def install(pages_by_group):
         client = _FakeClient(pages_by_group)
-        monkeypatch.setattr(cloudwatch, "_build_client", lambda cfg: client)
+        monkeypatch.setattr(cloudwatch, "build_client", lambda cfg: client)
         return client
 
     return install
@@ -246,7 +246,7 @@ def test_missing_credentials_explain_it_is_not_a_pst_token(monkeypatch):
         def get_paginator(self, _name):
             raise NoCredentialsError()
 
-    monkeypatch.setattr(cloudwatch, "_build_client", lambda cfg: Boom())
+    monkeypatch.setattr(cloudwatch, "build_client", lambda cfg: Boom())
     cfg = LogsConfig("prod", "us-east-2", None, {"api": "/prog-strength/api"})
     with pytest.raises(cloudwatch.CloudWatchError, match="PST_TOKEN"):
         cloudwatch.search(cfg, RID, WINDOW, limit=500)
