@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v0.5.0 (2026-07-31)
+
+### Features
+
+- **whoop**: Add pst whoop doctor and resync diagnostics
+  ([#7](https://github.com/Prog-Strength/prog-strength-tooling/pull/7),
+  [`336e951`](https://github.com/Prog-Strength/prog-strength-tooling/commit/336e951cf2b0a76e79de857de479e89156cc28bc))
+
+
 ## v0.4.0 (2026-07-31)
 
 ### Features
