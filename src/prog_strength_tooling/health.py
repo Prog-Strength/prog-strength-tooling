@@ -14,6 +14,9 @@ from dataclasses import dataclass
 import httpx
 
 from .config import SERVICES, Environment
+from .logsetup import get_logger, kv
+
+log = get_logger(__name__)
 
 
 @dataclass(frozen=True)
@@ -37,6 +40,7 @@ def check(name: str, base_url: str, timeout: float = 5.0) -> ServiceStatus:
     rather than raised — a status sweep should always render a full table.
     """
     url = base_url.rstrip("/") + "/health"
+    log.debug("probing %s", kv(service=name, url=url, timeout_s=timeout))
     start = time.monotonic()
     try:
         resp = httpx.get(url, timeout=timeout)
@@ -51,6 +55,10 @@ def check(name: str, base_url: str, timeout: float = 5.0) -> ServiceStatus:
     except ValueError:
         return ServiceStatus(name, url, False, None, None, latency_ms, "non-JSON health body")
 
+    log.debug(
+        "probe ok %s",
+        kv(service=name, version=body.get("version"), latency_ms=round(latency_ms, 1)),
+    )
     return ServiceStatus(
         name=name,
         url=url,

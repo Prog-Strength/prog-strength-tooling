@@ -85,3 +85,36 @@ def test_epoch_millisecond_conversion():
     window = resolve(None, datetime(2026, 7, 29, tzinfo=UTC), NOW, now=NOW)
     assert window.start_ms == int(datetime(2026, 7, 29, tzinfo=UTC).timestamp() * 1000)
     assert window.end_ms == int(NOW.timestamp() * 1000)
+
+
+def test_resolve_logs_the_relative_window_at_info(caplog):
+    # Despite the old name of this test, positional args are (since, start,
+    # end) -- "7d" here is --since, so this exercises the RELATIVE branch,
+    # not the explicit --start/--end one. See the explicit-bounds test below.
+    import logging
+
+    with caplog.at_level(logging.INFO, logger="prog_strength_tooling"):
+        resolve("7d", None, None)
+
+    line = " ".join(r.getMessage() for r in caplog.records)
+    assert "since=7d" in line
+    assert "start=" in line
+    assert "end=" in line
+
+
+def test_resolve_logs_the_explicit_window_at_info(caplog):
+    import logging
+
+    start = datetime(2026, 7, 29, 10, 0, tzinfo=UTC)
+    end = datetime(2026, 7, 29, 12, 0, tzinfo=UTC)
+    with caplog.at_level(logging.INFO, logger="prog_strength_tooling"):
+        resolve(None, start, end)
+
+    line = " ".join(r.getMessage() for r in caplog.records)
+    assert "start=" in line
+    assert "end=" in line
+    # This branch logs since=None, and kv() drops None values -- so "since="
+    # must be ABSENT here. That absence, not just the presence of start=/
+    # end=, is what actually distinguishes this branch from the relative one
+    # above (which also logs start=/end=, derived from the duration).
+    assert "since=" not in line

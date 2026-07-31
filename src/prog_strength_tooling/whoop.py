@@ -24,8 +24,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
+from .logsetup import get_logger, kv
 from .models import WhoopConnection
 from .whooplogs import DeliveryScan, SyncScan
+
+log = get_logger(__name__)
 
 #: The one path the api actually serves the WHOOP webhook on
 #: (internal/server: r.Post("/webhooks/whoop", …)). Every corrective action for
@@ -336,14 +339,24 @@ def diagnose(
     a missing token never blocks the log checks. Results are returned in SOW
     order.
     """
-    return Diagnosis(
-        checks=[
-            _check_deliveries_arriving(deliveries),
-            _check_delivery_path(deliveries),
-            _check_signatures_accepted(deliveries),
-            _check_deliveries_producing_syncs(deliveries, syncs),
-            _check_syncs_landing_rows(syncs),
-            _check_connection_health(connection, token_present),
-            _check_data_freshness(connection, token_present, now),
-        ]
-    )
+    checks = [
+        _check_deliveries_arriving(deliveries),
+        _check_delivery_path(deliveries),
+        _check_signatures_accepted(deliveries),
+        _check_deliveries_producing_syncs(deliveries, syncs),
+        _check_syncs_landing_rows(syncs),
+        _check_connection_health(connection, token_present),
+        _check_data_freshness(connection, token_present, now),
+    ]
+    for check in checks:
+        log.debug(
+            "check %s",
+            kv(
+                name=check.name,
+                ok=check.ok,
+                skipped=check.skipped,
+                reason=check.reason,
+                symptom=check.finding.symptom if check.finding else None,
+            ),
+        )
+    return Diagnosis(checks=checks)

@@ -26,7 +26,10 @@ from datetime import UTC, datetime
 
 from .config import ENV_AWS_PROFILE, LogsConfig
 from .logparse import LogRecord, parse
+from .logsetup import Heartbeat, get_logger, kv, timed
 from .window import Window
+
+log = get_logger(__name__)
 
 #: Longest request id we will send to CloudWatch. Ids are normally 32 hex
 #: chars, but the api's middleware adopts *any* inbound X-Request-ID, so an
@@ -89,6 +92,14 @@ def build_client(cfg: LogsConfig):
     `pst --help` don't pay its import cost (a few hundred ms) for commands
     that never touch AWS.
     """
+    # Logged BEFORE the import and the Session: `import boto3` costs a few
+    # hundred ms and Session construction is what reads ~/.aws/config and can
+    # stall on credential resolution, so a line emitted afterwards would be
+    # invisible for exactly the interval worth seeing.
+    log.debug(
+        "building AWS client %s",
+        kv(profile=cfg.profile or "default-chain", region=cfg.region),
+    )
     import boto3
     from botocore.exceptions import BotoCoreError, ProfileNotFound
 
@@ -165,19 +176,39 @@ def _search_group(client, service: str, group: str, request_id: str, window: Win
         PaginationConfig={"MaxItems": limit + 1},
     )
 
-    for page in pages:
-        for event in page.get("events", []):
-            message = event.get("message", "")
-            if request_id not in message:
-                continue
-            records.append(
-                parse(
-                    service=service,
-                    timestamp=datetime.fromtimestamp(event["timestamp"] / 1000, tz=UTC),
-                    message=message,
-                    stream=event.get("logStreamName", ""),
+    beat = Heartbeat(log, f"searching {group}")
+    page_count = 0
+    scanned = 0
+    with timed(log, "log group search", group=group) as summary:
+        for page in pages:
+            page_count += 1
+            events = page.get("events", [])
+            scanned += len(events)
+            for event in events:
+                message = event.get("message", "")
+                if request_id not in message:
+                    continue
+                records.append(
+                    parse(
+                        service=service,
+                        timestamp=datetime.fromtimestamp(event["timestamp"] / 1000, tz=UTC),
+                        message=message,
+                        stream=event.get("logStreamName", ""),
+                    )
                 )
+            # `events` is this page's count; `matched_total` is the RUNNING
+            # total of matches across every page fetched so far for this
+            # group. Naming it `matched` here would read as "this page's
+            # matched count" (e.g. "page=3 events=12 matched=7" parses as
+            # "12 events, 7 matched on this page"), which is wrong — it is a
+            # cumulative figure. The `summary.update(...)` call below IS the
+            # final total, and `matched` is the right name there.
+            log.debug(
+                "page fetched %s",
+                kv(group=group, page=page_count, events=len(events), matched_total=len(records)),
             )
+            beat.tick(pages=page_count, events=scanned)
+        summary.update(pages=page_count, scanned=scanned, matched=len(records))
 
     return records
 
@@ -207,10 +238,13 @@ def search(cfg: LogsConfig, request_id: str, window: Window, limit: int) -> Sear
         except (ClientError, BotoCoreError) as exc:
             raise CloudWatchError(describe_failure(exc, group, cfg)) from exc
 
+    log.info("searching %d log group(s) %s", len(groups), kv(window=window.describe()))
     # boto3 clients are safe to call from multiple threads; only creating them
     # is not, and that already happened above.
-    with ThreadPoolExecutor(max_workers=max(len(groups), 1)) as pool:
-        results = list(pool.map(run, groups))
+    with timed(log, "cloudwatch search", groups=len(groups)) as summary:
+        with ThreadPoolExecutor(max_workers=max(len(groups), 1)) as pool:
+            results = list(pool.map(run, groups))
+        summary.update(matched=sum(len(records) for _, records in results))
 
     counts = {service: len(records) for service, records in results}
     merged = [record for _, records in results for record in records]

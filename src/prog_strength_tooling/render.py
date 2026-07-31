@@ -19,6 +19,7 @@ from .health import ServiceStatus
 from .logparse import LogRecord
 from .models import MemoryList, SearchResult, WhoopResyncOutcome
 from .whoop import Diagnosis
+from .whooplogs import WhoopScan
 
 console = Console()
 err_console = Console(stderr=True)
@@ -281,13 +282,17 @@ def render_no_logs(*, request_id: str, searched: list[str], window_description: 
     )
 
 
-def render_diagnosis(diagnosis: Diagnosis, *, as_json: bool) -> None:
+def render_diagnosis(diagnosis: Diagnosis, scan: WhoopScan, *, as_json: bool) -> None:
     """Render the WHOOP doctor's seven checks: one line each, findings expanded.
 
     Everything goes to stdout via `console` so `--json` pipes cleanly (the
     error path writes to `err_console` in the command layer, not here). Finding
     prose is rendered as plain Text so evidence containing a stray bracket or a
     "/webhooks/whoop," path is shown literally, never read as rich markup.
+
+    The scan is carried alongside the diagnosis so a truncated read is never
+    presented as a complete one — a partial diagnosis that looks whole is worse
+    than no diagnosis, because "no deliveries found" would read as evidence.
     """
     if as_json:
         # Built from the dataclasses by hand (they aren't pydantic models, so
@@ -326,10 +331,55 @@ def render_diagnosis(diagnosis: Diagnosis, *, as_json: bool) -> None:
                         }
                         for f in diagnosis.findings
                     ],
+                    "scan": {
+                        "events_scanned": scan.events_scanned,
+                        "pages": scan.pages,
+                        "truncated": scan.truncated,
+                        "covered_start": (
+                            scan.covered_start.isoformat() if scan.covered_start else None
+                        ),
+                        "covered_end": (scan.covered_end.isoformat() if scan.covered_end else None),
+                    },
                 }
             )
         )
         return
+
+    if scan.truncated:
+        # The banner leads, before any check line, because it changes how every
+        # line beneath it should be read: an absence in a truncated scan is not
+        # evidence of absence.
+        #
+        # Naming WHICH end was read is the load-bearing part. The range quoted
+        # is the one actually covered (measured from event timestamps), and
+        # because FilterLogEvents returns events ascending by timestamp a
+        # capped scan always keeps the OLDEST slice — precisely the opposite of
+        # what the freshness and delivery checks care about. An operator who
+        # doesn't know CloudWatch's ordering would otherwise read a bare range
+        # and never realize the recent hours were never looked at.
+        #
+        # The remedies are deliberately not "raise --max-events": because the
+        # scan always starts from the oldest event, a bigger cap just reads
+        # further forward from the same starting point and may still never
+        # reach recent data. Narrowing --since moves the window's start;
+        # --max-events 0 reads all of it. Those are the two that actually work,
+        # and whooplogs.scan's WARNING says the same thing.
+        banner = Text()
+        banner.append("! ", style="yellow")
+        banner.append("results truncated", style="yellow bold")
+        banner.append(
+            f" — scanned {scan.events_scanned:,} events covering "
+            f"{scan.describe_coverage()}. That is the "
+        )
+        banner.append("OLDEST", style="bold")
+        banner.append(
+            " slice of the requested window — CloudWatch returns events "
+            "oldest-first, so more recent events were not read and the findings "
+            "below may be incomplete. Narrow --since, or pass --max-events 0 to "
+            "scan the whole window."
+        )
+        console.print(banner, highlight=False)
+        console.print()
 
     for c in diagnosis.checks:
         if c.skipped:

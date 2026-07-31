@@ -31,6 +31,10 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
+from .logsetup import get_logger, kv, redact
+
+log = get_logger(__name__)
+
 #: The backend services every environment defines, in display order.
 SERVICES: tuple[str, ...] = ("api", "agent", "mcp")
 
@@ -156,6 +160,10 @@ def services_for(name: str | None) -> dict[str, str] | None:
 def resolve_environment(env: str | None) -> Environment:
     """Resolve the active environment (--env -> PST_ENV -> default) + its URLs."""
     name = env or os.getenv(ENV_ENV) or DEFAULT_ENVIRONMENT
+    log.debug(
+        "resolving environment %s",
+        kv(flag=env, env_var=os.getenv(ENV_ENV), default=DEFAULT_ENVIRONMENT, chosen=name),
+    )
     services = services_for(name)
     assert services is not None  # name is always non-empty here
     return Environment(name=name, services=services)
@@ -171,6 +179,18 @@ def resolve(api: str | None, token: str | None, env: str | None = None) -> Confi
         or NAMED_ENVIRONMENTS[DEFAULT_ENVIRONMENT]["api"]
     )
     resolved_token = token or os.getenv(ENV_TOKEN) or None
+    log.debug(
+        "resolved api config %s",
+        kv(
+            api_flag=api,
+            env_flag=env,
+            api_env_var=os.getenv(ENV_API_URL),
+            api_url=api_url,
+            token=redact(resolved_token),
+            token_source=("flag" if token else "env" if os.getenv(ENV_TOKEN) else "none"),
+        ),
+    )
+    log.info("api %s", kv(url=api_url))
     return Config(api_url=api_url, token=resolved_token)
 
 
@@ -223,10 +243,21 @@ def resolve_logs(
 
     # Preserve SERVICES order regardless of flag order, so output is stable.
     chosen = set(selected)
+    resolved_profile = profile or os.getenv(ENV_AWS_PROFILE) or None
+    resolved_region = region or AWS_REGION
+    log.info(
+        "cloudwatch %s",
+        kv(
+            env=environment.name,
+            region=resolved_region,
+            profile=resolved_profile or "default-chain",
+            groups=",".join(log_group_for(s) for s in SERVICES if s in chosen),
+        ),
+    )
     return LogsConfig(
         environment=environment.name,
-        region=region or AWS_REGION,
-        profile=profile or os.getenv(ENV_AWS_PROFILE) or None,
+        region=resolved_region,
+        profile=resolved_profile,
         log_groups={s: log_group_for(s) for s in SERVICES if s in chosen},
     )
 

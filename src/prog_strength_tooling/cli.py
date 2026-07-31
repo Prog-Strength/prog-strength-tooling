@@ -8,8 +8,12 @@ registered directly on the root app.
 
 from __future__ import annotations
 
+import platform
+import sys
+
 import typer
 
+from . import __version__, logsetup
 from .commands import logs, memory, status, whoop
 
 # Typer collapses single newlines within a paragraph but preserves blank-line
@@ -21,8 +25,9 @@ maintenance against a chosen [bold]environment[/bold]. Commands default to \
 [bold green]prod[/bold green]; pass [cyan]--env local[/cyan] (or set [cyan]PST_ENV[/cyan]) to \
 target another.
 
-[dim]Health checks need no auth; the memory commands need an admin token \
-([cyan]PST_TOKEN[/cyan]); the log commands use your AWS credentials.[/dim]"""
+[dim]Health checks need no auth; the memory and whoop commands need an admin \
+token ([cyan]PST_TOKEN[/cyan]); the log commands — and [cyan]whoop doctor[/cyan]'s \
+log checks — use your AWS credentials.[/dim]"""
 
 EPILOG = """[bold]Examples[/bold]
 
@@ -34,10 +39,16 @@ EPILOG = """[bold]Examples[/bold]
 
 [cyan]pst logs trace REQUEST_ID[/cyan] — server-side logs for a client's failed call
 
+[cyan]pst whoop doctor[/cyan] — is WHOOP recovery data still landing?
+
 [dim]Environments: prod (default) · local — select with --env or PST_ENV.[/dim]
 
-[dim]Env vars: PST_ENV · PST_TOKEN (admin JWT, memory only) · PST_API_URL · \
-PST_AWS_PROFILE (logs only). Run 'pst COMMAND --help' for per-command options.[/dim]"""
+[dim]Verbosity: -v for debug logs, -vv to add AWS/HTTP wire logs, -q to quieten. \
+Logs go to stderr, so --json on stdout stays pipeable.[/dim]
+
+[dim]Env vars: PST_ENV · PST_TOKEN (admin JWT: memory, whoop) · PST_API_URL · \
+PST_AWS_PROFILE (logs, whoop doctor) · PST_LOG_LEVEL (debug/info/warning/error). \
+Run 'pst COMMAND --help' for per-command options.[/dim]"""
 
 app = typer.Typer(
     no_args_is_help=True,
@@ -45,6 +56,44 @@ app = typer.Typer(
     help=HELP,
     epilog=EPILOG,
 )
+
+
+@app.callback(help=HELP)
+def main(
+    verbose: int = typer.Option(
+        0,
+        "--verbose",
+        "-v",
+        count=True,
+        help="More log detail: [cyan]-v[/cyan] for pst debug logs, "
+        "[cyan]-vv[/cyan] to add AWS/HTTP wire logs.",
+    ),
+    quiet: bool = typer.Option(
+        False,
+        "--quiet",
+        "-q",
+        help="Log only warnings and errors.",
+    ),
+) -> None:
+    """Configure logging before any subcommand runs.
+
+    Logs go to stderr at INFO by default, so `--json` on stdout stays pipeable
+    and a long-running command still shows what phase it is in. Set
+    PST_LOG_LEVEL instead of passing a flag every time; an explicit flag wins.
+    """
+    logsetup.configure(verbosity=verbose, quiet=quiet)
+    log = logsetup.get_logger(__name__)
+    log.debug(
+        "pst starting %s",
+        logsetup.kv(version=__version__, python=platform.python_version()),
+    )
+    # sys.argv is the operator's real command line under the installed `pst`
+    # entry point, which is the case this line exists to serve. Under
+    # programmatic invocation (Typer's CliRunner, an embedder) Click never
+    # touches sys.argv, so it reflects the host process instead — this is a
+    # best-effort diagnostic, not an authoritative record of what was passed.
+    log.debug("argv: %s", " ".join(logsetup.redact_argv(sys.argv[1:])))
+
 
 app.add_typer(memory.app, name="memory")
 app.add_typer(logs.app, name="logs")

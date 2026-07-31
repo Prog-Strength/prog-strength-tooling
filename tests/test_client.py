@@ -103,3 +103,41 @@ def test_transport_failure_becomes_client_error():
     with MemoryClient(_cfg()) as client:
         with pytest.raises(ClientError):
             client.list_memories("u1")
+
+
+@respx.mock
+def test_client_logs_method_path_status_and_duration(caplog):
+    import logging
+
+    respx.get("https://api.progstrength.fitness/admin/memories").mock(
+        return_value=httpx.Response(200, json={"data": {"memories": [], "count": 0}})
+    )
+    cfg = Config(api_url="https://api.progstrength.fitness", token="admin-token-value-1234")
+
+    with caplog.at_level(logging.INFO, logger="prog_strength_tooling"):
+        with MemoryClient(cfg) as client:
+            client.list_memories(user_id="u1")
+
+    line = " ".join(r.getMessage() for r in caplog.records)
+    assert "GET" in line
+    assert "/admin/memories" in line
+    assert "status=200" in line
+    assert "elapsed_ms=" in line
+
+
+@respx.mock
+def test_client_never_logs_the_bearer_token(caplog):
+    import logging
+
+    secret = "eyJhbGciOiJIUzI1NiJ9.admin-token-payload.sig"
+    respx.get("https://api.progstrength.fitness/admin/memories").mock(
+        return_value=httpx.Response(200, json={"data": {"memories": [], "count": 0}})
+    )
+    cfg = Config(api_url="https://api.progstrength.fitness", token=secret)
+
+    with caplog.at_level(logging.DEBUG, logger="prog_strength_tooling"):
+        with MemoryClient(cfg) as client:
+            client.list_memories(user_id="u1")
+
+    for record in caplog.records:
+        assert secret not in record.getMessage()

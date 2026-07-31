@@ -9,7 +9,9 @@ from prog_strength_tooling.config import (
     MissingTokenError,
     resolve,
     resolve_admin,
+    resolve_logs,
 )
+from prog_strength_tooling.logsetup import redact
 
 PROD = NAMED_ENVIRONMENTS["prod"]["api"]
 LOCAL = NAMED_ENVIRONMENTS["local"]["api"]
@@ -152,3 +154,36 @@ def test_resolve_environment_unknown_raises():
 
     with pytest.raises(ConfigError):
         resolve_environment("staging")
+
+
+def test_resolve_logs_logs_the_environment_at_info(caplog):
+    import logging
+
+    with caplog.at_level(logging.INFO, logger="prog_strength_tooling"):
+        resolve_logs("prod", None, "my-profile", None)
+
+    line = " ".join(r.getMessage() for r in caplog.records)
+    assert "env=prod" in line
+    assert "region=us-east-2" in line
+    assert "profile=my-profile" in line
+
+
+def test_resolve_admin_never_logs_the_token(caplog):
+    import logging
+
+    secret = "eyJhbGciOiJIUzI1NiJ9.super-secret-payload.signature"
+    with caplog.at_level(logging.DEBUG, logger="prog_strength_tooling"):
+        resolve_admin(None, secret, "prod")
+
+    messages = [record.getMessage() for record in caplog.records]
+    for message in messages:
+        assert secret not in message
+        assert "super-secret-payload" not in message
+
+    # The negative loop above is trivially satisfied if resolve() logged
+    # nothing at all about the token -- which it would if the log.debug call
+    # in config.resolve were ever deleted. Prove the redacted form was
+    # actually logged, not merely absent, so this test can fail for the
+    # right reason.
+    redacted = redact(secret)
+    assert any("token=" in message and redacted in message for message in messages)
