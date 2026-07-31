@@ -348,15 +348,35 @@ def render_diagnosis(diagnosis: Diagnosis, scan: WhoopScan, *, as_json: bool) ->
     if scan.truncated:
         # The banner leads, before any check line, because it changes how every
         # line beneath it should be read: an absence in a truncated scan is not
-        # evidence of absence. The range quoted is the one actually covered
-        # (measured from event timestamps), not the window that was requested.
+        # evidence of absence.
+        #
+        # Naming WHICH end was read is the load-bearing part. The range quoted
+        # is the one actually covered (measured from event timestamps), and
+        # because FilterLogEvents returns events ascending by timestamp a
+        # capped scan always keeps the OLDEST slice — precisely the opposite of
+        # what the freshness and delivery checks care about. An operator who
+        # doesn't know CloudWatch's ordering would otherwise read a bare range
+        # and never realize the recent hours were never looked at.
+        #
+        # The remedies are deliberately not "raise --max-events": because the
+        # scan always starts from the oldest event, a bigger cap just reads
+        # further forward from the same starting point and may still never
+        # reach recent data. Narrowing --since moves the window's start;
+        # --max-events 0 reads all of it. Those are the two that actually work,
+        # and whooplogs.scan's WARNING says the same thing.
         banner = Text()
         banner.append("! ", style="yellow")
         banner.append("results truncated", style="yellow bold")
         banner.append(
             f" — scanned {scan.events_scanned:,} events covering "
-            f"{scan.describe_coverage()}; findings may be incomplete. "
-            f"Narrow --since or raise --max-events."
+            f"{scan.describe_coverage()}. That is the "
+        )
+        banner.append("OLDEST", style="bold")
+        banner.append(
+            " slice of the requested window — CloudWatch returns events "
+            "oldest-first, so more recent events were not read and the findings "
+            "below may be incomplete. Narrow --since, or pass --max-events 0 to "
+            "scan the whole window."
         )
         console.print(banner, highlight=False)
         console.print()

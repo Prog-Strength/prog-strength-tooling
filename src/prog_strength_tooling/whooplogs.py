@@ -326,9 +326,16 @@ def scan(cfg: LogsConfig, window: Window, max_events: int = MAX_EVENTS) -> Whoop
     )
 
     if truncated:
+        # Phrased to match render.render_diagnosis's operator banner: same
+        # event, so it must not offer different advice. Both name the OLDEST
+        # slice explicitly and both recommend narrowing --since or --max-events
+        # 0 — never "raise --max-events", which reads further forward from the
+        # same oldest starting point and may still never reach recent data.
         log.warning(
-            "scan hit --max-events %d after %d pages; covered %s of the requested %s. "
-            "Narrow --since, or pass --max-events 0 to scan the whole window.",
+            "scan hit --max-events %d after %d pages; covered the OLDEST %s of the "
+            "requested %s. CloudWatch returns events oldest-first, so more recent "
+            "events were not read. Narrow --since, or pass --max-events 0 to scan "
+            "the whole window.",
             max_events,
             pages,
             result.describe_coverage(),

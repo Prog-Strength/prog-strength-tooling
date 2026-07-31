@@ -270,6 +270,13 @@ def test_scan_warns_when_truncated(fake_client, caplog):
     assert len(warnings) == 1
     assert "max-events" in warnings[0]
     assert "covered" in warnings[0]
+    # Same event as render's operator banner, so it must not give different
+    # advice: name the OLDEST slice, say recent events are missing, and offer
+    # only the two remedies that actually restore recent coverage.
+    assert "OLDEST" in warnings[0]
+    assert "oldest-first" in warnings[0]
+    assert "more recent events were not read" in warnings[0]
+    assert "Narrow --since, or pass --max-events 0" in warnings[0]
 
 
 def test_scan_of_exactly_max_events_is_not_truncated(fake_client, caplog):

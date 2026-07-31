@@ -29,6 +29,16 @@ def _plain(text: str) -> str:
     return _ANSI.sub("", text)
 
 
+def _unwrap(text: str) -> str:
+    """Strip colour and collapse whitespace, so prose assertions survive wrapping.
+
+    rich reflows the truncation banner to the console width, which can drop a
+    newline into the middle of any phrase. Asserting on the unwrapped form
+    tests what the sentence SAYS rather than where it happened to break.
+    """
+    return " ".join(_plain(text).split())
+
+
 BASE = "https://api.progstrength.fitness"
 
 
@@ -288,9 +298,47 @@ def test_diagnosis_shows_a_truncation_banner(capsys):
     scan = _scan(HEALTHY_DELIVERIES, HEALTHY_SYNCS, truncated=True)
     render_diagnosis(_diagnose(scan), scan, as_json=False)
 
-    out = _plain(capsys.readouterr().out)
+    out = _unwrap(capsys.readouterr().out)
     assert "results truncated" in out
     assert "2026-07-29 08:00Z" in out
+
+
+def test_truncation_banner_says_which_end_of_the_window_was_read(capsys):
+    """The load-bearing fact: a capped scan keeps the OLDEST slice.
+
+    CloudWatch returns events ascending by timestamp, so truncation drops the
+    most recent events — exactly the ones the freshness and delivery checks
+    care about. A banner reporting only a bare range lets an operator assume
+    the recent hours were covered, which is the misreading the banner exists
+    to prevent.
+    """
+    from prog_strength_tooling.render import render_diagnosis
+
+    scan = _scan(HEALTHY_DELIVERIES, HEALTHY_SYNCS, truncated=True)
+    render_diagnosis(_diagnose(scan), scan, as_json=False)
+
+    out = _unwrap(capsys.readouterr().out)
+    assert "OLDEST slice of the requested window" in out
+    assert "oldest-first" in out
+    # It must say the recent events are MISSING, not merely that data is old.
+    assert "more recent events were not read" in out
+
+
+def test_truncation_banner_recommends_remedies_that_actually_work(capsys):
+    """Raising the cap reads further from the same oldest start — not a fix.
+
+    Only narrowing --since (moving the window's start) or --max-events 0
+    (reading all of it) restores recent coverage, so the banner must not
+    offer a cap bump as an equally good option.
+    """
+    from prog_strength_tooling.render import render_diagnosis
+
+    scan = _scan(HEALTHY_DELIVERIES, HEALTHY_SYNCS, truncated=True)
+    render_diagnosis(_diagnose(scan), scan, as_json=False)
+
+    out = _unwrap(capsys.readouterr().out)
+    assert "Narrow --since, or pass --max-events 0" in out
+    assert "raise --max-events" not in out
 
 
 def test_diagnosis_has_no_banner_when_complete(capsys):
@@ -352,7 +400,7 @@ def test_doctor_banners_a_truncated_scan(scans):
     result = runner.invoke(app, ["whoop", "doctor"])
     # Still healthy — truncation is a caveat on the evidence, not a finding.
     assert result.exit_code == 0
-    assert "results truncated" in _plain(result.output)
+    assert "results truncated" in _unwrap(result.output)
 
 
 def test_doctor_json_reports_truncation(scans):
