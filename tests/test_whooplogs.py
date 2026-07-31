@@ -236,3 +236,110 @@ def test_scan_wraps_botocore_failure_as_cloudwatch_error(monkeypatch):
     monkeypatch.setattr(cloudwatch, "build_client", lambda cfg: Boom())
     with pytest.raises(cloudwatch.CloudWatchError, match="logs:FilterLogEvents"):
         whooplogs.scan_deliveries(CFG, WINDOW)
+
+
+# --- single-pass scan -----------------------------------------------------
+
+
+def test_scan_serves_both_aggregations_from_one_pagination(fake_client):
+    """The whole point of the rewrite: one AWS pass, not two."""
+    client = fake_client([_healthy_page()])
+    result = whooplogs.scan(CFG, WINDOW)
+
+    assert len(client.paginator.calls) == 1
+    assert result.deliveries.groups[0].uri == "/webhooks/whoop"
+    assert result.deliveries.groups[0].count == 5
+    assert result.syncs.window_sync_count == 2
+    assert result.syncs.upserted_total == 5
+
+
+def test_scan_reports_events_pages_and_is_not_truncated(fake_client):
+    fake_client([_healthy_page()])
+    result = whooplogs.scan(CFG, WINDOW)
+    assert result.events_scanned == 8
+    assert result.pages == 1
+    assert result.truncated is False
+
+
+def test_scan_records_the_timestamp_range_it_actually_covered(fake_client):
+    fake_client([_healthy_page()])
+    result = whooplogs.scan(CFG, WINDOW)
+    # _healthy_page spans event timestamps 1000ms..7000ms.
+    assert result.covered_start.timestamp() == pytest.approx(1.0)
+    assert result.covered_end.timestamp() == pytest.approx(7.0)
+
+
+def test_scan_stops_at_max_events_and_marks_truncation(fake_client):
+    good = "http://api.progstrength.fitness/webhooks/whoop"
+    pages = [
+        _page(*[_event(1_000 + i, _request_line("POST", good, 204)) for i in range(10)]),
+        _page(*[_event(2_000 + i, _request_line("POST", good, 204)) for i in range(10)]),
+        _page(*[_event(3_000 + i, _request_line("POST", good, 204)) for i in range(10)]),
+    ]
+    fake_client(pages)
+    result = whooplogs.scan(CFG, WINDOW, max_events=15)
+
+    assert result.truncated is True
+    assert result.events_scanned == 15
+    # Stopped partway through page 2, so page 3 was never counted.
+    assert result.pages == 2
+    # Coverage reflects real event timestamps, NOT the requested window: a
+    # capped scan keeps the OLDEST slice, since FilterLogEvents returns events
+    # ascending by timestamp.
+    assert result.covered_end.timestamp() == pytest.approx(2.004)
+    assert result.covered_end.timestamp() < WINDOW.end.timestamp()
+
+
+def test_scan_with_max_events_zero_scans_everything(fake_client):
+    good = "http://api.progstrength.fitness/webhooks/whoop"
+    pages = [
+        _page(*[_event(1_000 + i, _request_line("POST", good, 204)) for i in range(10)]),
+        _page(*[_event(2_000 + i, _request_line("POST", good, 204)) for i in range(10)]),
+    ]
+    fake_client(pages)
+    result = whooplogs.scan(CFG, WINDOW, max_events=0)
+    assert result.truncated is False
+    assert result.events_scanned == 20
+
+
+def test_scan_warns_when_truncated(fake_client, caplog):
+    import logging
+
+    good = "http://api.progstrength.fitness/webhooks/whoop"
+    fake_client([_page(*[_event(1_000 + i, _request_line("POST", good, 204)) for i in range(10)])])
+    with caplog.at_level(logging.WARNING, logger="prog_strength_tooling"):
+        whooplogs.scan(CFG, WINDOW, max_events=5)
+
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1
+    assert "max-events" in warnings[0]
+    assert "covered" in warnings[0]
+
+
+def test_scan_on_an_empty_window_has_no_coverage(fake_client):
+    fake_client([_page()])
+    result = whooplogs.scan(CFG, WINDOW)
+    assert result.events_scanned == 0
+    assert result.covered_start is None
+    assert result.covered_end is None
+    assert result.truncated is False
+
+
+def test_scan_queries_only_the_api_group_with_a_quoted_whoop_pattern(fake_client):
+    client = fake_client([_page()])
+    whooplogs.scan(CFG, WINDOW)
+    call = client.paginator.calls[0]
+    assert call["logGroupName"] == "/prog-strength/api"
+    assert call["filterPattern"] == '"whoop"'
+    assert call["startTime"] == WINDOW.start_ms
+    assert call["endTime"] == WINDOW.end_ms
+
+
+def test_scan_of_the_outage_fixture_shows_the_misroute_and_no_syncs(fake_client):
+    fake_client([_outage_page()])
+    result = whooplogs.scan(CFG, WINDOW)
+    assert [(g.uri, g.status, g.count) for g in result.deliveries.groups] == [
+        ("/webhooks/whoop,", 404, 97)
+    ]
+    assert result.syncs.window_sync_count == 0
+    assert result.syncs.upserted_total == 0
