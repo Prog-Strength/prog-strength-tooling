@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v0.4.0 (2026-07-31)
+
+### Features
+
+- **logs**: Add `pst logs trace` for request-id lookups
+  ([#6](https://github.com/Prog-Strength/prog-strength-tooling/pull/6),
+  [`2f9a31b`](https://github.com/Prog-Strength/prog-strength-tooling/commit/2f9a31b2cc4d718f00f9fe29be2d50c2228f4b0d))
+
+
 ## v0.3.0 (2026-07-31)
 
 ### Continuous Integration
