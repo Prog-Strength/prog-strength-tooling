@@ -17,7 +17,8 @@ from rich.text import Text
 from .config import Environment
 from .health import ServiceStatus
 from .logparse import LogRecord
-from .models import MemoryList, SearchResult
+from .models import MemoryList, SearchResult, WhoopResyncOutcome
+from .whoop import Diagnosis
 
 console = Console()
 err_console = Console(stderr=True)
@@ -278,3 +279,112 @@ def render_no_logs(*, request_id: str, searched: list[str], window_description: 
         "\n  · confirm the id was copied whole from the response body's "
         "[cyan]request_id[/cyan]\n    or the [cyan]X-Request-ID[/cyan] header"
     )
+
+
+def render_diagnosis(diagnosis: Diagnosis, *, as_json: bool) -> None:
+    """Render the WHOOP doctor's seven checks: one line each, findings expanded.
+
+    Everything goes to stdout via `console` so `--json` pipes cleanly (the
+    error path writes to `err_console` in the command layer, not here). Finding
+    prose is rendered as plain Text so evidence containing a stray bracket or a
+    "/webhooks/whoop," path is shown literally, never read as rich markup.
+    """
+    if as_json:
+        # Built from the dataclasses by hand (they aren't pydantic models, so
+        # _print_json's model_dump path doesn't apply). Findings are duplicated
+        # under a top-level key for the same convenience `Diagnosis.findings`
+        # gives in code — a caller wants the failures without walking checks.
+        console.print_json(
+            json.dumps(
+                {
+                    "healthy": diagnosis.healthy,
+                    "checks": [
+                        {
+                            "name": c.name,
+                            "ok": c.ok,
+                            "skipped": c.skipped,
+                            "reason": c.reason,
+                            "finding": (
+                                None
+                                if c.finding is None
+                                else {
+                                    "check": c.finding.check,
+                                    "symptom": c.finding.symptom,
+                                    "evidence": c.finding.evidence,
+                                    "fix": c.finding.fix,
+                                }
+                            ),
+                        }
+                        for c in diagnosis.checks
+                    ],
+                    "findings": [
+                        {
+                            "check": f.check,
+                            "symptom": f.symptom,
+                            "evidence": f.evidence,
+                            "fix": f.fix,
+                        }
+                        for f in diagnosis.findings
+                    ],
+                }
+            )
+        )
+        return
+
+    for c in diagnosis.checks:
+        if c.skipped:
+            line = Text()
+            line.append("- ", style="yellow")
+            line.append(c.name, style="dim")
+            line.append("  skipped", style="yellow")
+            if c.reason:
+                line.append(f" — {c.reason}", style="dim")
+            console.print(line, highlight=False)
+        elif c.ok:
+            line = Text()
+            line.append("✓ ", style="green")
+            line.append(c.name)
+            console.print(line, highlight=False)
+        else:
+            # A failed check: the glyph + name, then the finding's three
+            # fields indented beneath it (symptom / evidence / fix).
+            line = Text()
+            line.append("✗ ", style="red")
+            line.append(c.name, style="red")
+            console.print(line, highlight=False)
+            if c.finding is not None:
+                for label, value in (
+                    ("symptom", c.finding.symptom),
+                    ("evidence", c.finding.evidence),
+                    ("fix", c.finding.fix),
+                ):
+                    detail = Text()
+                    detail.append(f"    {label}: ", style="dim")
+                    detail.append(value)
+                    console.print(detail, highlight=False)
+
+    if diagnosis.healthy:
+        console.print("\n[green]WHOOP ingestion looks healthy.[/green]")
+    else:
+        n = len(diagnosis.findings)
+        console.print(f"\n[red]{n} finding{'s' if n != 1 else ''}[/red] — see fixes above.")
+
+
+def render_resync(outcome: WhoopResyncOutcome, *, as_json: bool) -> None:
+    """Render a resync outcome: rows upserted and the three skip tallies."""
+    if as_json:
+        _print_json(outcome)
+        return
+
+    table = Table(title="whoop resync")
+    table.add_column("upserted", justify="right", style="green", no_wrap=True)
+    table.add_column("skipped: unscored", justify="right", style="dim", no_wrap=True)
+    table.add_column("skipped: no cycle", justify="right", style="dim", no_wrap=True)
+    table.add_column("skipped: bad date", justify="right", style="dim", no_wrap=True)
+    table.add_row(
+        str(outcome.upserted),
+        str(outcome.skipped_unscored),
+        str(outcome.skipped_no_cycle),
+        str(outcome.skipped_bad_date),
+    )
+    console.print(table)
