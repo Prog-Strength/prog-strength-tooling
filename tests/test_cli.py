@@ -151,3 +151,22 @@ def test_quiet_flag_sets_the_warning_level():
 
     runner.invoke(app, ["-q", "status", "--help"])
     assert logging.getLogger(logsetup.ROOT_LOGGER).level == logging.WARNING
+
+
+def test_startup_debug_line_redacts_a_token(monkeypatch, caplog):
+    # CliRunner.invoke never touches sys.argv (Click calls cli.main(args=...)
+    # directly), so the callback's argv line reads whatever process actually
+    # launched — here that's pytest's own argv. Set it explicitly so this test
+    # proves redaction on the line the callback really emits, rather than
+    # passing vacuously regardless of whether redact_argv works at all.
+    import logging
+    import sys
+
+    monkeypatch.setattr(sys, "argv", ["pst", "--token", "SUPERSECRET", "status", "--help"])
+    with caplog.at_level(logging.DEBUG, logger="prog_strength_tooling"):
+        runner.invoke(app, ["-v", "status", "--help"])
+
+    argv_lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("argv:")]
+    assert argv_lines, "expected an argv DEBUG line"
+    assert "SUPERSECRET" not in " ".join(argv_lines)
+    assert "***" in argv_lines[0]

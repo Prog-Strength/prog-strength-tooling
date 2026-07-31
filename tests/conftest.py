@@ -16,9 +16,12 @@ top of this cleared baseline.
 
 from __future__ import annotations
 
+import logging
 import os
 
 import pytest
+
+from prog_strength_tooling import logsetup
 
 #: Prefix covering every environment variable this CLI reads (PST_ENV,
 #: PST_TOKEN, PST_API_URL, PST_AWS_PROFILE, PST_LOG_LEVEL). Matched by prefix
@@ -31,3 +34,30 @@ def _isolate_pst_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Remove every PST_* variable so the operator's shell can't reach a test."""
     for name in [key for key in os.environ if key.startswith(PST_PREFIX)]:
         monkeypatch.delenv(name, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _restore_logging():
+    """Undo whatever configure() did, so tests don't leak levels into each other.
+
+    `logsetup.configure()` mutates process-global logging state: the root
+    logger's handlers and level, the package logger's level, and every logger
+    in `WIRE_LOGGERS`. Without restoring all of that after each test, whichever
+    test last called configure() (directly, or indirectly via `runner.invoke`
+    hitting the root Typer callback) silently dictates the logging levels every
+    later test observes — a real, order-dependent flake, not a theoretical one.
+    Autouse and hoisted into conftest so every test module gets this for free,
+    not just the ones that happen to remember to ask for it.
+    """
+    root = logging.getLogger()
+    saved_handlers = list(root.handlers)
+    saved_level = root.level
+    pst = logging.getLogger(logsetup.ROOT_LOGGER)
+    saved_pst_level = pst.level
+    saved_wire_levels = {name: logging.getLogger(name).level for name in logsetup.WIRE_LOGGERS}
+    yield
+    root.handlers = saved_handlers
+    root.setLevel(saved_level)
+    pst.setLevel(saved_pst_level)
+    for name, level in saved_wire_levels.items():
+        logging.getLogger(name).setLevel(level)

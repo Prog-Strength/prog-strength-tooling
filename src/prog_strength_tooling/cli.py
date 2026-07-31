@@ -81,6 +81,11 @@ def main(
         "pst starting %s",
         logsetup.kv(version=__version__, python=platform.python_version()),
     )
+    # sys.argv is the operator's real command line under the installed `pst`
+    # entry point, which is the case this line exists to serve. Under
+    # programmatic invocation (Typer's CliRunner, an embedder) Click never
+    # touches sys.argv, so it reflects the host process instead — this is a
+    # best-effort diagnostic, not an authoritative record of what was passed.
     log.debug("argv: %s", " ".join(logsetup.redact_argv(sys.argv[1:])))
 
 

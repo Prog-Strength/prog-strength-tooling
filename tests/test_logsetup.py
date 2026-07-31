@@ -192,20 +192,10 @@ def test_heartbeat_emits_at_most_once_per_interval(caplog):
 
 
 # --- handler installation -------------------------------------------------
-
-
-@pytest.fixture(autouse=True)
-def _restore_logging():
-    """Undo whatever configure() did, so tests don't leak handlers into each other."""
-    root = logging.getLogger()
-    saved_handlers = list(root.handlers)
-    saved_level = root.level
-    pst = logging.getLogger(logsetup.ROOT_LOGGER)
-    saved_pst_level = pst.level
-    yield
-    root.handlers = saved_handlers
-    root.setLevel(saved_level)
-    pst.setLevel(saved_pst_level)
+#
+# The `_restore_logging` autouse fixture that guards these tests against
+# leaking process-global logger levels lives in tests/conftest.py, so every
+# test module gets it — not just this one.
 
 
 def test_configure_sets_the_package_logger_level():
