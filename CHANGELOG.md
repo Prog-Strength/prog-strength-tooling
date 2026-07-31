@@ -2,6 +2,26 @@
 
 <!-- version list -->
 
+## v0.3.0 (2026-07-31)
+
+### Continuous Integration
+
+- **release**: Keep uv.lock in sync on release
+  ([#5](https://github.com/Prog-Strength/prog-strength-tooling/pull/5),
+  [`8823721`](https://github.com/Prog-Strength/prog-strength-tooling/commit/88237219a0ea32271a4f50a2e4f2dc6227c6db67))
+
+### Documentation
+
+- **cli**: Clearer operator-focused `pst --help`
+  ([#4](https://github.com/Prog-Strength/prog-strength-tooling/pull/4),
+  [`1e32764`](https://github.com/Prog-Strength/prog-strength-tooling/commit/1e327649da3b30b41596cbaed41ed4ff55cba916))
+
+### Features
+
+- Add error message for missing admin token
+  ([`069adf8`](https://github.com/Prog-Strength/prog-strength-tooling/commit/069adf89ff3b54fcb699d7a9089aae20ea9a950d))
+
+
 ## v0.2.0 (2026-06-22)
 
 ### Continuous Integration
