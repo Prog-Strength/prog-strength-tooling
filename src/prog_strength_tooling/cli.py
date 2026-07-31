@@ -25,8 +25,9 @@ maintenance against a chosen [bold]environment[/bold]. Commands default to \
 [bold green]prod[/bold green]; pass [cyan]--env local[/cyan] (or set [cyan]PST_ENV[/cyan]) to \
 target another.
 
-[dim]Health checks need no auth; the memory commands need an admin token \
-([cyan]PST_TOKEN[/cyan]); the log commands use your AWS credentials.[/dim]"""
+[dim]Health checks need no auth; the memory and whoop commands need an admin \
+token ([cyan]PST_TOKEN[/cyan]); the log commands — and [cyan]whoop doctor[/cyan]'s \
+log checks — use your AWS credentials.[/dim]"""
 
 EPILOG = """[bold]Examples[/bold]
 
@@ -38,10 +39,15 @@ EPILOG = """[bold]Examples[/bold]
 
 [cyan]pst logs trace REQUEST_ID[/cyan] — server-side logs for a client's failed call
 
+[cyan]pst whoop doctor[/cyan] — is WHOOP recovery data still landing?
+
 [dim]Environments: prod (default) · local — select with --env or PST_ENV.[/dim]
 
-[dim]Env vars: PST_ENV · PST_TOKEN (admin JWT, memory only) · PST_API_URL · \
-PST_AWS_PROFILE (logs only) · PST_LOG_LEVEL (debug/info/warning/error). \
+[dim]Verbosity: -v for debug logs, -vv to add AWS/HTTP wire logs, -q to quieten. \
+Logs go to stderr, so --json on stdout stays pipeable.[/dim]
+
+[dim]Env vars: PST_ENV · PST_TOKEN (admin JWT: memory, whoop) · PST_API_URL · \
+PST_AWS_PROFILE (logs, whoop doctor) · PST_LOG_LEVEL (debug/info/warning/error). \
 Run 'pst COMMAND --help' for per-command options.[/dim]"""
 
 app = typer.Typer(
