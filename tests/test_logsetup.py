@@ -66,6 +66,11 @@ def test_kv_with_no_fields_is_empty():
     assert logsetup.kv() == ""
 
 
+def test_kv_keeps_falsy_but_not_none_values():
+    # Insurance against "simplifying" the None-check to a truthiness check.
+    assert logsetup.kv(pages=0, name="") == "pages=0 name="
+
+
 def test_redact_shows_only_the_tail_and_length():
     token = "eyJhbGciOiJIUzI1NiJ9.payload.sig9"
     out = logsetup.redact(token)
@@ -76,6 +81,12 @@ def test_redact_shows_only_the_tail_and_length():
 def test_redact_hides_short_tokens_entirely():
     # Too short for a 4-char tail to be safe — show nothing but the length.
     assert logsetup.redact("abc123") == "present (len 6)"
+
+
+def test_redact_at_the_min_redactable_len_boundary():
+    # Pins the `<` vs `<=` choice: 11 chars stays hidden, 12 gets a tail.
+    assert logsetup.redact("a" * 11) == "present (len 11)"
+    assert logsetup.redact("a" * 12) == "…aaaa (len 12)"
 
 
 def test_redact_reports_a_missing_token():
@@ -123,6 +134,28 @@ def test_timed_still_logs_when_the_body_raises(caplog):
                 raise ValueError("boom")
 
     assert any("whoop log scan" in r.getMessage() for r in caplog.records)
+
+
+def test_timed_logs_a_debug_start_line_on_entry(caplog):
+    log = logging.getLogger("prog_strength_tooling.test")
+    with caplog.at_level(logging.DEBUG, logger="prog_strength_tooling.test"):
+        with logsetup.timed(log, "whoop log scan", group="/prog-strength/api"):
+            pass
+
+    debug_messages = [r.getMessage() for r in caplog.records if r.levelno == logging.DEBUG]
+    assert len(debug_messages) == 1
+    assert "whoop log scan" in debug_messages[0]
+
+
+def test_timed_key_collision_in_finally_does_not_mask_the_bodys_exception(caplog):
+    """A `finally` that raises would replace the real exception with a
+    spurious TypeError — exactly the failure mode this helper must avoid."""
+    log = logging.getLogger("prog_strength_tooling.test")
+    with caplog.at_level(logging.INFO, logger="prog_strength_tooling.test"):
+        with pytest.raises(ValueError):
+            with logsetup.timed(log, "whoop log scan", pages=1) as extra:
+                extra["pages"] = 2  # collides with the `fields` key above
+                raise ValueError("boom")
 
 
 class _FakeClock:

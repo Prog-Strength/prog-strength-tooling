@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 
 #: Logger name every module in this package logs under, via `get_logger`.
@@ -89,7 +89,10 @@ def resolve_level(
 _MIN_REDACTABLE_LEN = 12
 
 #: Flags whose value is a secret and must never reach a log line or a
-#: DEBUG-echoed argv.
+#: DEBUG-echoed argv. Matched by exact spelling, not by prefix or alias — as
+#: of writing the CLI has no `-t` short form for `--token`, but if one is
+#: ever added it must be listed here too, or it will slip past redact_argv
+#: unmasked.
 _SECRET_FLAGS = ("--token",)
 
 
@@ -166,7 +169,13 @@ def timed(logger: logging.Logger, event: str, **fields: object) -> Iterator[dict
         yield extra
     finally:
         elapsed_ms = round((time.monotonic() - start) * 1000, 1)
-        logger.info("%s %s", event, kv(**fields, **extra, elapsed_ms=elapsed_ms))
+        # Dict-merge rather than a keyword-splat call: a key collision between
+        # fields and extra (or either colliding with elapsed_ms) must not
+        # raise here. A `finally` that raises replaces whatever exception the
+        # body was propagating, which would swap a real ClientError for a
+        # spurious TypeError during exactly the hang investigation this
+        # helper exists for.
+        logger.info("%s %s", event, kv(**{**fields, **extra, "elapsed_ms": elapsed_ms}))
 
 
 class Heartbeat:
@@ -176,17 +185,21 @@ class Heartbeat:
     a fast run stays quiet, a slow one keeps proving it is alive. Plain log
     lines rather than a rich live widget, so progress survives being piped or
     redirected to a file.
+
+    `activity` is interpolated into `"  ...%s ..."`, so it reads as a
+    present-participle phrase describing what's in progress (e.g.
+    "scanning /prog-strength/api"), not a standalone sentence.
     """
 
     def __init__(
         self,
         logger: logging.Logger,
-        message: str,
+        activity: str,
         interval: float = 5.0,
-        clock=time.monotonic,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._logger = logger
-        self._message = message
+        self._activity = activity
         self._interval = interval
         self._clock = clock
         self._start = clock()
@@ -199,4 +212,4 @@ class Heartbeat:
             return
         self._last = now
         elapsed_s = round(now - self._start, 1)
-        self._logger.info("  ...%s %s", self._message, kv(**fields, elapsed_s=elapsed_s))
+        self._logger.info("  ...%s %s", self._activity, kv(**fields, elapsed_s=elapsed_s))
