@@ -7,6 +7,7 @@ asserted alongside the output.
 """
 
 import json
+import re
 
 import httpx
 import pytest
@@ -18,6 +19,15 @@ from prog_strength_tooling.cli import app
 from prog_strength_tooling.whooplogs import DeliveryGroup, DeliveryScan, SyncScan
 
 runner = CliRunner()
+
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _plain(text: str) -> str:
+    """Strip ANSI colour so help-text assertions don't depend on whether the
+    runner (locally) or CI (FORCE_COLOR) renders rich output with escapes."""
+    return _ANSI.sub("", text)
+
 
 BASE = "https://api.progstrength.fitness"
 
@@ -228,12 +238,14 @@ def test_resync_api_error_maps_to_message_and_nonzero_exit():
 def test_whoop_help_works():
     result = runner.invoke(app, ["whoop", "--help"])
     assert result.exit_code == 0
-    assert "doctor" in result.stdout
-    assert "resync" in result.stdout
+    out = _plain(result.stdout)
+    assert "doctor" in out
+    assert "resync" in out
 
 
 def test_doctor_help_works():
     result = runner.invoke(app, ["whoop", "doctor", "--help"])
     assert result.exit_code == 0
-    assert "--user" in result.stdout
-    assert "--since" in result.stdout
+    out = _plain(result.stdout)
+    assert "--user" in out
+    assert "--since" in out
