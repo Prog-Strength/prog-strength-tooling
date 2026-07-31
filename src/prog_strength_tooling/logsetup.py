@@ -16,9 +16,13 @@ can log without creating an import cycle.
 from __future__ import annotations
 
 import logging
+import os
 import time
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
+
+from rich.console import Console
+from rich.logging import RichHandler
 
 #: Logger name every module in this package logs under, via `get_logger`.
 ROOT_LOGGER = "prog_strength_tooling"
@@ -213,3 +217,51 @@ class Heartbeat:
         self._last = now
         elapsed_s = round(now - self._start, 1)
         self._logger.info("  ...%s %s", self._activity, kv(**fields, elapsed_s=elapsed_s))
+
+
+#: Marks the handler this module installs, so `configure` can replace its own
+#: handler without touching anyone else's — notably pytest's caplog handler,
+#: which lives on the root logger and would otherwise be removed, silently
+#: blinding every log assertion in the suite.
+_HANDLER_ATTR = "_pst_cli"
+
+
+def configure(verbosity: int = 0, quiet: bool = False) -> None:
+    """Install the CLI's log handler and set levels. Safe to call repeatedly.
+
+    The handler goes on the **root** logger, writing to stderr, and per-logger
+    levels decide what reaches it (during propagation Python checks handler
+    levels, not ancestor logger levels). Our own logger is left propagating so
+    pytest's caplog — and any future embedder — still sees the records.
+    """
+    level, wire, warning = resolve_level(verbosity, quiet, os.getenv(ENV_LOG_LEVEL))
+
+    handler = RichHandler(
+        console=Console(stderr=True),
+        show_path=False,
+        # Log lines are data, not markup: an evidence string like
+        # "/webhooks/whoop," or a message containing "[dim]" must render
+        # literally rather than be swallowed as a rich tag.
+        markup=False,
+        rich_tracebacks=True,
+        log_time_format="%H:%M:%S",
+    )
+    # At DEBUG the speaking module is the point; at INFO it is noise.
+    fmt = "[%(name)s] %(message)s" if level <= logging.DEBUG else "%(message)s"
+    handler.setFormatter(logging.Formatter(fmt))
+    setattr(handler, _HANDLER_ATTR, True)
+
+    root = logging.getLogger()
+    for existing in [h for h in root.handlers if getattr(h, _HANDLER_ATTR, False)]:
+        root.removeHandler(existing)
+    root.addHandler(handler)
+    # Only gates records logged directly on root (nothing here does); keeps a
+    # stray third-party WARNING visible without opening the floodgates.
+    root.setLevel(logging.WARNING)
+
+    logging.getLogger(ROOT_LOGGER).setLevel(level)
+    for name in WIRE_LOGGERS:
+        logging.getLogger(name).setLevel(logging.DEBUG if wire else logging.WARNING)
+
+    if warning:
+        logging.getLogger(ROOT_LOGGER).warning(warning)

@@ -189,3 +189,69 @@ def test_heartbeat_emits_at_most_once_per_interval(caplog):
     assert "pages=3" in messages[0]
     assert "pages=5" in messages[1]
     assert "elapsed_s=" in messages[0]
+
+
+# --- handler installation -------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _restore_logging():
+    """Undo whatever configure() did, so tests don't leak handlers into each other."""
+    root = logging.getLogger()
+    saved_handlers = list(root.handlers)
+    saved_level = root.level
+    pst = logging.getLogger(logsetup.ROOT_LOGGER)
+    saved_pst_level = pst.level
+    yield
+    root.handlers = saved_handlers
+    root.setLevel(saved_level)
+    pst.setLevel(saved_pst_level)
+
+
+def test_configure_sets_the_package_logger_level():
+    logsetup.configure(verbosity=1, quiet=False)
+    assert logging.getLogger(logsetup.ROOT_LOGGER).level == logging.DEBUG
+
+
+def test_configure_is_idempotent():
+    """Typer's CliRunner invokes the callback once per test; handlers must not stack."""
+    logsetup.configure()
+    logsetup.configure()
+    logsetup.configure()
+    ours = [h for h in logging.getLogger().handlers if getattr(h, "_pst_cli", False)]
+    assert len(ours) == 1
+
+
+def test_configure_leaves_foreign_handlers_alone():
+    """It must never remove pytest's caplog handler, or log assertions go blind."""
+    root = logging.getLogger()
+    foreign = logging.NullHandler()
+    root.addHandler(foreign)
+    logsetup.configure()
+    assert foreign in root.handlers
+
+
+def test_configure_keeps_wire_loggers_quiet_by_default():
+    logsetup.configure(verbosity=1, quiet=False)
+    assert logging.getLogger("botocore").level == logging.WARNING
+
+
+def test_double_verbose_turns_on_wire_loggers():
+    logsetup.configure(verbosity=2, quiet=False)
+    for name in logsetup.WIRE_LOGGERS:
+        assert logging.getLogger(name).level == logging.DEBUG
+
+
+def test_configure_warns_once_about_a_bad_env_level(monkeypatch, caplog):
+    monkeypatch.setenv(logsetup.ENV_LOG_LEVEL, "chatty")
+    with caplog.at_level(logging.WARNING, logger=logsetup.ROOT_LOGGER):
+        logsetup.configure()
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1
+    assert "chatty" in warnings[0]
+
+
+def test_configure_reads_the_env_level(monkeypatch):
+    monkeypatch.setenv(logsetup.ENV_LOG_LEVEL, "error")
+    logsetup.configure()
+    assert logging.getLogger(logsetup.ROOT_LOGGER).level == logging.ERROR
