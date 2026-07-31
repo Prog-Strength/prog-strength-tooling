@@ -16,11 +16,12 @@ api emits:
     by the JSON slog handler in internal/logging.
 """
 
+import functools
 import json
 
 import pytest
 
-from prog_strength_tooling import cloudwatch, whooplogs
+from prog_strength_tooling import cloudwatch, logsetup, whooplogs
 from prog_strength_tooling.config import LogsConfig
 from prog_strength_tooling.window import resolve
 
@@ -312,3 +313,72 @@ def test_scan_of_the_outage_fixture_shows_the_misroute_and_no_syncs(fake_client)
     ]
     assert result.syncs.window_sync_count == 0
     assert result.syncs.upserted_total == 0
+
+
+# --- multi-page accumulation ------------------------------------------------
+
+
+def test_scan_accumulates_events_and_pages_across_multiple_pages(fake_client):
+    """Nothing else in the suite drives `scan` over more than one page without
+    also tripping the max-events cap, so page/event accumulation across a
+    normal (uncapped) multi-page run has never actually been pinned."""
+    good = "http://api.progstrength.fitness/webhooks/whoop"
+    pages = [
+        _page(*[_event(1_000 + i, _request_line("POST", good, 204)) for i in range(4)]),
+        _page(*[_event(2_000 + i, _request_line("POST", good, 204)) for i in range(6)]),
+        _page(*[_event(3_000 + i, _request_line("POST", good, 204)) for i in range(3)]),
+    ]
+    fake_client(pages)
+    result = whooplogs.scan(CFG, WINDOW)
+
+    assert result.pages == 3
+    assert result.events_scanned == 13
+    assert result.deliveries.groups[0].count == 13
+    assert result.truncated is False
+
+
+def test_scan_at_exact_cap_with_more_data_reads_into_the_next_page(fake_client):
+    """Pins the exact-boundary-with-more-data case: `max_events=10` over TWO
+    pages of 10 events each. The event proving truncation exists only on page
+    2, so the scan must fetch into it to observe it — if a future refactor
+    stopped paging as soon as the quota was reached, this would silently
+    regress `truncated` to False since the proof event would never be seen."""
+    good = "http://api.progstrength.fitness/webhooks/whoop"
+    pages = [
+        _page(*[_event(1_000 + i, _request_line("POST", good, 204)) for i in range(10)]),
+        _page(*[_event(2_000 + i, _request_line("POST", good, 204)) for i in range(10)]),
+    ]
+    fake_client(pages)
+    result = whooplogs.scan(CFG, WINDOW, max_events=10)
+
+    assert result.truncated is True
+    assert result.events_scanned == 10
+    assert result.pages == 2
+
+
+def test_scan_emits_heartbeat_progress_through_a_real_scan(fake_client, caplog, monkeypatch):
+    """`Heartbeat.tick`'s emission branch has its own fake-clock unit test in
+    test_logsetup.py, but nothing exercises it through an actual `scan` --
+    every fake-client test finishes in well under the 5s default interval, so
+    `tick()` always takes the no-op early return in practice.
+
+    Forcing `interval=0.0` here (rather than threading a fake clock through
+    `scan`, which has no parameter for one) makes every tick() call emit,
+    without touching production code to make it more testable than the real
+    call site requires.
+    """
+    monkeypatch.setattr(whooplogs, "Heartbeat", functools.partial(logsetup.Heartbeat, interval=0.0))
+    good = "http://api.progstrength.fitness/webhooks/whoop"
+    pages = [
+        _page(*[_event(1_000 + i, _request_line("POST", good, 204)) for i in range(3)]),
+        _page(*[_event(2_000 + i, _request_line("POST", good, 204)) for i in range(3)]),
+    ]
+    fake_client(pages)
+    import logging
+
+    with caplog.at_level(logging.INFO, logger="prog_strength_tooling"):
+        whooplogs.scan(CFG, WINDOW)
+
+    progress = [r.getMessage() for r in caplog.records if "...scanning" in r.getMessage()]
+    assert progress, "expected at least one heartbeat progress line"
+    assert "pages=" in progress[0]

@@ -192,9 +192,16 @@ def _search_group(client, service: str, group: str, request_id: str, window: Win
                         stream=event.get("logStreamName", ""),
                     )
                 )
+            # `events` is this page's count; `matched_total` is the RUNNING
+            # total of matches across every page fetched so far for this
+            # group. Naming it `matched` here would read as "this page's
+            # matched count" (e.g. "page=3 events=12 matched=7" parses as
+            # "12 events, 7 matched on this page"), which is wrong — it is a
+            # cumulative figure. The `summary.update(...)` call below IS the
+            # final total, and `matched` is the right name there.
             log.debug(
                 "page fetched %s",
-                kv(group=group, page=page_count, events=len(events), matched=len(records)),
+                kv(group=group, page=page_count, events=len(events), matched_total=len(records)),
             )
             beat.tick(pages=page_count, events=scanned)
         summary.update(pages=page_count, scanned=scanned, matched=len(records))

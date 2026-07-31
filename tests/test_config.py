@@ -11,6 +11,7 @@ from prog_strength_tooling.config import (
     resolve_admin,
     resolve_logs,
 )
+from prog_strength_tooling.logsetup import redact
 
 PROD = NAMED_ENVIRONMENTS["prod"]["api"]
 LOCAL = NAMED_ENVIRONMENTS["local"]["api"]
@@ -174,6 +175,15 @@ def test_resolve_admin_never_logs_the_token(caplog):
     with caplog.at_level(logging.DEBUG, logger="prog_strength_tooling"):
         resolve_admin(None, secret, "prod")
 
-    for record in caplog.records:
-        assert secret not in record.getMessage()
-        assert "super-secret-payload" not in record.getMessage()
+    messages = [record.getMessage() for record in caplog.records]
+    for message in messages:
+        assert secret not in message
+        assert "super-secret-payload" not in message
+
+    # The negative loop above is trivially satisfied if resolve() logged
+    # nothing at all about the token -- which it would if the log.debug call
+    # in config.resolve were ever deleted. Prove the redacted form was
+    # actually logged, not merely absent, so this test can fail for the
+    # right reason.
+    redacted = redact(secret)
+    assert any("token=" in message and redacted in message for message in messages)

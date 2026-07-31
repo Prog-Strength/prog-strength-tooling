@@ -245,3 +245,68 @@ def test_configure_reads_the_env_level(monkeypatch):
     monkeypatch.setenv(logsetup.ENV_LOG_LEVEL, "error")
     logsetup.configure()
     assert logging.getLogger(logsetup.ROOT_LOGGER).level == logging.ERROR
+
+
+def test_configure_writes_to_stderr_not_stdout(capsys):
+    """Load-bearing: the whole design rests on logs going to stderr so that
+    `--json` on stdout stays pipeable. Nothing else in the suite asserts this
+    — a future accidental `Console(stderr=False)` would sail through every
+    other test untouched.
+
+    `configure()` is called INSIDE the test, after capsys has already swapped
+    in its captured stderr/stdout, rather than relying on any handler
+    installed by an earlier test/fixture — rich's `Console` resolves its
+    output stream (stderr vs stdout) dynamically off `sys.stderr`/`sys.stdout`
+    on each write, but there is no reason to depend on that lookup timing when
+    calling configure() fresh here is just as easy and removes the question.
+    """
+    logsetup.configure()
+    logging.getLogger(logsetup.ROOT_LOGGER).info("canary line for stderr routing")
+
+    captured = capsys.readouterr()
+    assert "canary line for stderr routing" in captured.err
+    assert "canary line for stderr routing" not in captured.out
+
+
+def test_configure_sets_the_root_logger_level_to_warning():
+    """`configure()` deliberately sets the ROOT logger (not our own) to
+    WARNING: it gates records logged directly on root — third-party code that
+    calls `logging.warning(...)` without its own logger — without opening the
+    floodgates to every library's INFO/DEBUG chatter, which our own logger's
+    level already governs independently."""
+    logsetup.configure()
+    assert logging.getLogger().level == logging.WARNING
+
+
+def _tagged_handler() -> logging.Handler:
+    """The handler `configure()` installs on the root logger, found by the
+    `_pst_cli` tag so a test never mistakes pytest's own caplog handler (or
+    any other foreign handler) for it."""
+    return next(h for h in logging.getLogger().handlers if getattr(h, "_pst_cli", False))
+
+
+def test_configure_formatter_switches_on_level():
+    """At DEBUG the speaking module is the point (which of a dozen modules
+    logged this?); at INFO and above it is noise nobody asked for. Formats a
+    real record through the installed handler's formatter at both levels
+    rather than inspecting `_fmt` directly, so this stays a black-box check of
+    what actually reaches the terminal."""
+    record = logging.LogRecord(
+        name="prog_strength_tooling.whooplogs",
+        level=logging.INFO,
+        pathname=__file__,
+        lineno=1,
+        msg="scan complete",
+        args=(),
+        exc_info=None,
+    )
+
+    logsetup.configure(verbosity=1)
+    debug_line = _tagged_handler().formatter.format(record)
+
+    logsetup.configure()
+    info_line = _tagged_handler().formatter.format(record)
+
+    assert "[prog_strength_tooling.whooplogs]" in debug_line
+    assert "[prog_strength_tooling.whooplogs]" not in info_line
+    assert info_line == "scan complete"
