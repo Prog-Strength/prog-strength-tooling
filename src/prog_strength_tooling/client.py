@@ -12,10 +12,15 @@ ClientError. Commands catch these and print a one-line message + exit 1.
 
 from __future__ import annotations
 
+import time
+
 import httpx
 
 from .config import Config
+from .logsetup import get_logger, kv, redact
 from .models import MemoryList, SearchResult, WhoopConnection, WhoopResyncOutcome
+
+log = get_logger(__name__)
 
 
 class ClientError(Exception):
@@ -29,6 +34,43 @@ class APIError(Exception):
         self.status_code = status_code
         self.message = message
         super().__init__(f"{status_code}: {message}")
+
+
+def _request(client: httpx.Client, method: str, path: str, **kwargs) -> httpx.Response:
+    """Issue a request, logging the outcome with its duration.
+
+    The duration is the single most useful field here: a command that appears
+    hung is usually sitting inside one of these calls waiting out the client
+    timeout, and the WARNING on failure prints how long it actually waited.
+    The Authorization header is never logged — only the path, status, and time.
+
+    The DEBUG line below splats `params` into `kv` alongside `method`/`path`.
+    That's safe today because every caller's params/body keys (limit, offset,
+    user_id, query, k, threshold, ...) are request fields, never "method" or
+    "path" themselves — but it would raise TypeError if a future caller ever
+    added a query param literally named "method" or "path".
+    """
+    log.debug("request %s", kv(method=method, path=path, **kwargs.get("params", {}) or {}))
+    start = time.monotonic()
+    try:
+        resp = client.request(method, path, **kwargs)
+    except httpx.HTTPError as exc:
+        elapsed_ms = round((time.monotonic() - start) * 1000, 1)
+        log.warning(
+            "%s %s failed %s",
+            method,
+            path,
+            kv(error=type(exc).__name__, elapsed_ms=elapsed_ms),
+        )
+        raise
+    elapsed_ms = round((time.monotonic() - start) * 1000, 1)
+    log.info(
+        "%s %s %s",
+        method,
+        path,
+        kv(status=resp.status_code, bytes=len(resp.content), elapsed_ms=elapsed_ms),
+    )
+    return resp
 
 
 class MemoryClient:
@@ -46,6 +88,11 @@ class MemoryClient:
             base_url=cfg.base_url,
             headers={"Authorization": f"Bearer {cfg.token}"},
             timeout=timeout,
+        )
+        log.debug(
+            "%s ready %s",
+            type(self).__name__,
+            kv(base_url=cfg.base_url, timeout_s=timeout, token=redact(cfg.token)),
         )
 
     def __enter__(self) -> "MemoryClient":
@@ -93,14 +140,14 @@ class MemoryClient:
 
     def _get(self, path: str, params: dict[str, str | int]) -> dict:
         try:
-            resp = self._client.get(path, params=params)
+            resp = _request(self._client, "GET", path, params=params)
         except httpx.HTTPError as exc:
             raise ClientError(str(exc)) from exc
         return self._unwrap(resp)
 
     def _post(self, path: str, body: dict[str, object]) -> dict:
         try:
-            resp = self._client.post(path, json=body)
+            resp = _request(self._client, "POST", path, json=body)
         except httpx.HTTPError as exc:
             raise ClientError(str(exc)) from exc
         return self._unwrap(resp)
@@ -148,6 +195,11 @@ class WhoopAdminClient:
             headers={"Authorization": f"Bearer {cfg.token}"},
             timeout=timeout,
         )
+        log.debug(
+            "%s ready %s",
+            type(self).__name__,
+            kv(base_url=cfg.base_url, timeout_s=timeout, token=redact(cfg.token)),
+        )
 
     def __enter__(self) -> "WhoopAdminClient":
         return self
@@ -180,14 +232,14 @@ class WhoopAdminClient:
 
     def _get(self, path: str, params: dict[str, str | int]) -> dict:
         try:
-            resp = self._client.get(path, params=params)
+            resp = _request(self._client, "GET", path, params=params)
         except httpx.HTTPError as exc:
             raise ClientError(str(exc)) from exc
         return MemoryClient._unwrap(resp)
 
     def _post(self, path: str, body: dict[str, object]) -> dict:
         try:
-            resp = self._client.post(path, json=body)
+            resp = _request(self._client, "POST", path, json=body)
         except httpx.HTTPError as exc:
             raise ClientError(str(exc)) from exc
         return MemoryClient._unwrap(resp)
