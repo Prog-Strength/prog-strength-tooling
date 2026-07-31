@@ -51,7 +51,13 @@ def stubbed(monkeypatch):
 
 
 class _FakePaginator:
-    """Returns canned pages per log group, so concurrent fan-out is stable."""
+    """Returns canned pages per log group, so concurrent fan-out is stable.
+
+    `pages_by_group` is normally a dict keyed by log group name. A plain list
+    is also accepted as shorthand for "every group sees these same pages" —
+    handy for a test that only cares about one group's worth of log lines
+    showing up, not the per-group breakdown.
+    """
 
     def __init__(self, pages_by_group):
         self._pages_by_group = pages_by_group
@@ -59,7 +65,9 @@ class _FakePaginator:
 
     def paginate(self, **kwargs):
         self.calls.append(kwargs)
-        return self._pages_by_group.get(kwargs["logGroupName"], [_page()])
+        if isinstance(self._pages_by_group, dict):
+            return self._pages_by_group.get(kwargs["logGroupName"], [_page()])
+        return self._pages_by_group
 
 
 class _FakeClient:
@@ -256,3 +264,15 @@ def test_unknown_profile_is_reported_before_any_query():
     cfg = LogsConfig("prod", "us-east-2", "does-not-exist-anywhere", {"api": "/x"})
     with pytest.raises(cloudwatch.CloudWatchError, match="not found"):
         cloudwatch.search(cfg, RID, WINDOW, limit=500)
+
+
+def test_search_logs_progress_and_totals(fake_client, caplog):
+    import logging
+
+    fake_client([_page(_event(1_000, "req-abc started"))])
+    with caplog.at_level(logging.INFO, logger="prog_strength_tooling"):
+        cloudwatch.search(CFG, "req-abc", WINDOW, 500)
+
+    line = " ".join(r.getMessage() for r in caplog.records)
+    assert "/prog-strength/api" in line
+    assert "elapsed_ms=" in line
