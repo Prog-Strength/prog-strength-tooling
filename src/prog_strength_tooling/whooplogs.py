@@ -147,9 +147,14 @@ def _paginate_whoop(client, group: str, window: Window, max_events: int):
     the substring, so one pass feeds both aggregations.
 
     `max_events` (0 = unlimited) is passed as MaxItems so botocore stops
-    fetching server-side too, mirroring cloudwatch._search_group; the caller
-    still counts client-side, because only the caller can tell the difference
-    between "that was everything" and "we cut it short".
+    fetching server-side too, mirroring cloudwatch._search_group. The `+ 1` is
+    not slack: it is what makes the boundary decidable. Fetching one event
+    beyond the quota lets the caller distinguish "that was everything" from
+    "we cut it short" — without it, a window holding precisely `max_events`
+    events is indistinguishable from one holding more, and would be reported
+    as truncated when nothing was actually dropped. The caller still counts
+    client-side, because that extra event is evidence to be observed, not data
+    to be folded into the results.
     """
     paginator = client.get_paginator("filter_log_events")
     kwargs: dict[str, object] = {
@@ -337,6 +342,21 @@ def scan(cfg: LogsConfig, window: Window, max_events: int = MAX_EVENTS) -> Whoop
                 pages += 1
                 events = page.get("events", [])
                 for event in events:
+                    if max_events and events_scanned >= max_events:
+                        # We already have our full quota, and yet here is
+                        # another event: that is the proof the window held more
+                        # than we read. Checking BEFORE processing (rather than
+                        # after) is what makes `truncated` honest at the exact
+                        # boundary — a window holding precisely `max_events`
+                        # events was read in full, not cut short, and must not
+                        # warn. MaxItems is max_events + 1 for exactly this
+                        # reason: it buys the one extra event whose existence
+                        # answers the question. This event is deliberately not
+                        # folded in, so the counts and the covered range
+                        # describe only what we actually read.
+                        truncated = True
+                        break
+
                     events_scanned += 1
                     stamp = event.get("timestamp")
                     if isinstance(stamp, int):
@@ -351,10 +371,6 @@ def scan(cfg: LogsConfig, window: Window, max_events: int = MAX_EVENTS) -> Whoop
                         upserted = record.get("upserted", 0)
                         if isinstance(upserted, int):
                             upserted_total += upserted
-
-                    if max_events and events_scanned >= max_events:
-                        truncated = True
-                        break
 
                 log.debug(
                     "page fetched %s",

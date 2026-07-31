@@ -316,6 +316,20 @@ def test_scan_warns_when_truncated(fake_client, caplog):
     assert "covered" in warnings[0]
 
 
+def test_scan_of_exactly_max_events_is_not_truncated(fake_client, caplog):
+    """A window holding precisely the cap was read in full, not cut short."""
+    import logging
+
+    good = "http://api.progstrength.fitness/webhooks/whoop"
+    fake_client([_page(*[_event(1_000 + i, _request_line("POST", good, 204)) for i in range(10)])])
+    with caplog.at_level(logging.WARNING, logger="prog_strength_tooling"):
+        result = whooplogs.scan(CFG, WINDOW, max_events=10)
+
+    assert result.events_scanned == 10
+    assert result.truncated is False
+    assert [r for r in caplog.records if r.levelno == logging.WARNING] == []
+
+
 def test_scan_on_an_empty_window_has_no_coverage(fake_client):
     fake_client([_page()])
     result = whooplogs.scan(CFG, WINDOW)
