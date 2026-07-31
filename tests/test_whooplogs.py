@@ -112,23 +112,6 @@ def _outage_page():
     return _page(*events)
 
 
-def test_outage_delivery_scan_groups_the_misroute(fake_client):
-    fake_client([_outage_page()])
-    scan = whooplogs.scan_deliveries(CFG, WINDOW)
-    assert len(scan.groups) == 1
-    group = scan.groups[0]
-    assert group.uri == "/webhooks/whoop,"
-    assert group.status == 404
-    assert group.count == 97
-
-
-def test_outage_sync_scan_sees_no_window_syncs(fake_client):
-    fake_client([_outage_page()])
-    scan = whooplogs.scan_syncs(CFG, WINDOW)
-    assert scan.window_sync_count == 0
-    assert scan.upserted_total == 0
-
-
 # --- healthy fixture: correct deliveries + window syncs -------------------
 
 
@@ -144,34 +127,7 @@ def _healthy_page():
     return _page(*events)
 
 
-def test_healthy_delivery_scan_groups_successful_posts(fake_client):
-    fake_client([_healthy_page()])
-    scan = whooplogs.scan_deliveries(CFG, WINDOW)
-    assert len(scan.groups) == 1
-    group = scan.groups[0]
-    assert group.uri == "/webhooks/whoop"
-    assert group.status == 204
-    assert group.count == 5
-
-
-def test_healthy_sync_scan_counts_window_syncs_and_sums_upserted(fake_client):
-    fake_client([_healthy_page()])
-    scan = whooplogs.scan_syncs(CFG, WINDOW)
-    assert scan.window_sync_count == 2
-    assert scan.upserted_total == 5
-
-
 # --- shared behaviour -----------------------------------------------------
-
-
-def test_scans_query_only_the_api_group_with_a_quoted_whoop_pattern(fake_client):
-    client = fake_client([_page()])
-    whooplogs.scan_deliveries(CFG, WINDOW)
-    call = client.paginator.calls[0]
-    assert call["logGroupName"] == "/prog-strength/api"
-    assert call["filterPattern"] == '"whoop"'
-    assert call["startTime"] == WINDOW.start_ms
-    assert call["endTime"] == WINDOW.end_ms
 
 
 def test_delivery_scan_skips_unparseable_lines(fake_client):
@@ -184,8 +140,8 @@ def test_delivery_scan_skips_unparseable_lines(fake_client):
             )
         ]
     )
-    scan = whooplogs.scan_deliveries(CFG, WINDOW)
-    assert [(g.uri, g.status, g.count) for g in scan.groups] == [("/webhooks/whoop", 204, 1)]
+    result = whooplogs.scan(CFG, WINDOW).deliveries
+    assert [(g.uri, g.status, g.count) for g in result.groups] == [("/webhooks/whoop", 204, 1)]
 
 
 def test_delivery_scan_ignores_non_post_and_non_whoop(fake_client):
@@ -198,14 +154,13 @@ def test_delivery_scan_ignores_non_post_and_non_whoop(fake_client):
             )
         ]
     )
-    scan = whooplogs.scan_deliveries(CFG, WINDOW)
-    assert [(g.uri, g.status, g.count) for g in scan.groups] == [("/webhooks/whoop", 204, 1)]
+    result = whooplogs.scan(CFG, WINDOW).deliveries
+    assert [(g.uri, g.status, g.count) for g in result.groups] == [("/webhooks/whoop", 204, 1)]
 
 
 def test_delivery_scan_matches_whoop_case_insensitively(fake_client):
     fake_client([_page(_event(1_000, _request_line("POST", "http://h/Webhooks/WHOOP", 204)))])
-    scan = whooplogs.scan_deliveries(CFG, WINDOW)
-    assert scan.groups[0].count == 1
+    assert whooplogs.scan(CFG, WINDOW).deliveries.groups[0].count == 1
 
 
 def test_delivery_groups_sorted_by_count_desc(fake_client):
@@ -214,8 +169,8 @@ def test_delivery_groups_sorted_by_count_desc(fake_client):
         _event(100 + i, _request_line("POST", "http://h/webhooks/whoop", 204)) for i in range(7)
     ]
     fake_client([_page(*events)])
-    scan = whooplogs.scan_deliveries(CFG, WINDOW)
-    assert [(g.status, g.count) for g in scan.groups] == [(204, 7), (404, 3)]
+    result = whooplogs.scan(CFG, WINDOW).deliveries
+    assert [(g.status, g.count) for g in result.groups] == [(204, 7), (404, 3)]
 
 
 def test_scan_wraps_botocore_failure_as_cloudwatch_error(monkeypatch):
@@ -235,7 +190,7 @@ def test_scan_wraps_botocore_failure_as_cloudwatch_error(monkeypatch):
 
     monkeypatch.setattr(cloudwatch, "build_client", lambda cfg: Boom())
     with pytest.raises(cloudwatch.CloudWatchError, match="logs:FilterLogEvents"):
-        whooplogs.scan_deliveries(CFG, WINDOW)
+        whooplogs.scan(CFG, WINDOW)
 
 
 # --- single-pass scan -----------------------------------------------------

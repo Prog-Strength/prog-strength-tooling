@@ -16,7 +16,7 @@ from typer.testing import CliRunner
 
 from prog_strength_tooling import cloudwatch, whooplogs
 from prog_strength_tooling.cli import app
-from prog_strength_tooling.whooplogs import DeliveryGroup, DeliveryScan, SyncScan
+from prog_strength_tooling.whooplogs import DeliveryGroup, DeliveryScan, SyncScan, WhoopScan
 
 runner = CliRunner()
 
@@ -34,13 +34,41 @@ BASE = "https://api.progstrength.fitness"
 
 @pytest.fixture
 def scans(monkeypatch):
-    """Install fixture DeliveryScan/SyncScan for the doctor's log checks."""
+    """Install a fixture WhoopScan for the doctor's log checks."""
 
-    def install(deliveries: DeliveryScan, syncs: SyncScan):
-        monkeypatch.setattr(whooplogs, "scan_deliveries", lambda *a, **k: deliveries)
-        monkeypatch.setattr(whooplogs, "scan_syncs", lambda *a, **k: syncs)
+    def install(deliveries: DeliveryScan, syncs: SyncScan, *, truncated: bool = False):
+        result = _scan(deliveries, syncs, truncated=truncated)
+        monkeypatch.setattr(whooplogs, "scan", lambda *a, **k: result)
+        return result
 
     return install
+
+
+def _scan(deliveries, syncs, *, truncated=False, events=1204, pages=3):
+    """A WhoopScan wrapping fixture aggregations, as the command would build it."""
+    from datetime import UTC, datetime
+
+    return WhoopScan(
+        deliveries=deliveries,
+        syncs=syncs,
+        events_scanned=events,
+        pages=pages,
+        truncated=truncated,
+        covered_start=datetime(2026, 7, 29, 8, 0, tzinfo=UTC),
+        covered_end=datetime(2026, 7, 30, 9, 15, tzinfo=UTC),
+    )
+
+
+def _diagnose(scan):
+    """Run the engine over a fixture scan with no admin evidence (checks 6/7 skip).
+
+    `diagnose` takes `now` positionally with no default, so it is passed here.
+    """
+    from datetime import UTC, datetime
+
+    from prog_strength_tooling.whoop import diagnose
+
+    return diagnose(scan.deliveries, scan.syncs, None, False, datetime.now(UTC))
 
 
 # --- fixtures for the two canonical states --------------------------------
@@ -156,7 +184,7 @@ def test_doctor_cloudwatch_error_exits_2(monkeypatch):
     def boom(*a, **k):
         raise cloudwatch.CloudWatchError("access denied reading /prog-strength/api")
 
-    monkeypatch.setattr(whooplogs, "scan_deliveries", boom)
+    monkeypatch.setattr(whooplogs, "scan", boom)
     result = runner.invoke(app, ["whoop", "doctor"])
     assert result.exit_code == 2
     assert "access denied" in result.output
@@ -249,3 +277,86 @@ def test_doctor_help_works():
     out = _plain(result.stdout)
     assert "--user" in out
     assert "--since" in out
+
+
+# --- truncation: a partial read must never read as a complete diagnosis ---
+
+
+def test_diagnosis_shows_a_truncation_banner(capsys):
+    from prog_strength_tooling.render import render_diagnosis
+
+    scan = _scan(HEALTHY_DELIVERIES, HEALTHY_SYNCS, truncated=True)
+    render_diagnosis(_diagnose(scan), scan, as_json=False)
+
+    out = _plain(capsys.readouterr().out)
+    assert "results truncated" in out
+    assert "2026-07-29 08:00Z" in out
+
+
+def test_diagnosis_has_no_banner_when_complete(capsys):
+    from prog_strength_tooling.render import render_diagnosis
+
+    scan = _scan(HEALTHY_DELIVERIES, HEALTHY_SYNCS)
+    render_diagnosis(_diagnose(scan), scan, as_json=False)
+
+    assert "truncated" not in _plain(capsys.readouterr().out)
+
+
+def test_diagnosis_json_carries_the_scan_metadata(capsys):
+    from prog_strength_tooling.render import render_diagnosis
+
+    scan = _scan(HEALTHY_DELIVERIES, HEALTHY_SYNCS, truncated=True)
+    render_diagnosis(_diagnose(scan), scan, as_json=True)
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["scan"]["truncated"] is True
+    assert payload["scan"]["events_scanned"] == 1204
+    assert payload["scan"]["pages"] == 3
+    assert payload["scan"]["covered_start"].startswith("2026-07-29T08:00")
+
+
+def test_doctor_forwards_max_events_to_the_scan(monkeypatch):
+    seen = {}
+
+    def capture(cfg, window, max_events):
+        seen["max_events"] = max_events
+        return _scan(HEALTHY_DELIVERIES, HEALTHY_SYNCS)
+
+    monkeypatch.setattr(whooplogs, "scan", capture)
+    result = runner.invoke(app, ["whoop", "doctor", "--max-events", "500"])
+    assert result.exit_code == 0
+    assert seen["max_events"] == 500
+
+
+def test_doctor_defaults_to_the_module_cap(monkeypatch):
+    seen = {}
+
+    def capture(cfg, window, max_events):
+        seen["max_events"] = max_events
+        return _scan(HEALTHY_DELIVERIES, HEALTHY_SYNCS)
+
+    monkeypatch.setattr(whooplogs, "scan", capture)
+    runner.invoke(app, ["whoop", "doctor"])
+    assert seen["max_events"] == whooplogs.MAX_EVENTS
+
+
+def test_doctor_rejects_a_negative_max_events(scans):
+    scans(HEALTHY_DELIVERIES, HEALTHY_SYNCS)
+    result = runner.invoke(app, ["whoop", "doctor", "--max-events", "-1"])
+    assert result.exit_code == 2
+    assert "--max-events" in result.output
+
+
+def test_doctor_banners_a_truncated_scan(scans):
+    scans(HEALTHY_DELIVERIES, HEALTHY_SYNCS, truncated=True)
+    result = runner.invoke(app, ["whoop", "doctor"])
+    # Still healthy — truncation is a caveat on the evidence, not a finding.
+    assert result.exit_code == 0
+    assert "results truncated" in _plain(result.output)
+
+
+def test_doctor_json_reports_truncation(scans):
+    scans(OUTAGE_DELIVERIES, OUTAGE_SYNCS, truncated=True)
+    result = runner.invoke(app, ["whoop", "doctor", "--json"])
+    assert result.exit_code == 1
+    assert json.loads(result.stdout)["scan"]["truncated"] is True

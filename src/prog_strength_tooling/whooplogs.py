@@ -23,9 +23,11 @@ ceiling — an uncapped paginator over a 7-day window of a busy log group is
 how `doctor` came to look like it had hung. `scan` caps at MAX_EVENTS and
 reports what it actually managed to read (see WhoopScan).
 
-The legacy `scan_deliveries` / `scan_syncs` pair below is retained only until
-the doctor is switched over to `scan`; it is on its way out and should not
-gain new callers.
+`scan` is the only entry point, deliberately: the two functions it replaced
+(one per aggregation) were what made the double pagination possible, and
+keeping them as thin wrappers would have left that mistake one call site away
+from returning. A new aggregation belongs in the fold loop inside `scan`, not
+in a second pass over the same events.
 
 Why one FilterLogEvents call + client-side aggregation (not Logs Insights):
 same rationale cloudwatch.py documents — FilterLogEvents is billed per call
@@ -181,87 +183,6 @@ def _uri_path(url: str) -> str:
     after_scheme = url.split("://", 1)[-1]
     slash = after_scheme.find("/")
     return after_scheme[slash:] if slash != -1 else after_scheme
-
-
-def scan_deliveries(cfg: LogsConfig, window: Window) -> DeliveryScan:
-    """Group whoop POST request lines by (uri, status) with counts.
-
-    Only POSTs whose path contains "whoop" (case-insensitive) count — a GET
-    health probe or a strava webhook that happened to share the page is not a
-    whoop delivery. Lines that don't parse as a request line are skipped
-    (a sync line, an OAuth log): dropping them is right, not an error, since
-    the "whoop" filter deliberately pulls in more than request lines.
-
-    Superseded by `scan`, which produces this same DeliveryScan from a pass
-    shared with the sync aggregation. Kept (and deliberately still uncapped,
-    max_events=0) only until the doctor is switched over.
-    """
-    client = cloudwatch.build_client(cfg)
-    group = log_group_for("api")
-
-    counts: dict[tuple[str, int], int] = {}
-    try:
-        for page in _paginate_whoop(client, group, window, 0):
-            for event in page.get("events", []):
-                match = _REQUEST_RE.search(event.get("message", ""))
-                if match is None:
-                    continue
-                if match.group("method") != "POST":
-                    continue
-                uri = _uri_path(match.group("url"))
-                if "whoop" not in uri.lower():
-                    continue
-                status = int(match.group("status"))
-                key = (uri, status)
-                counts[key] = counts.get(key, 0) + 1
-    except (ClientError, BotoCoreError) as exc:
-        # Reuse the shared translation so credential/permission/region errors
-        # read the same here as in `pst logs`.
-        raise cloudwatch.CloudWatchError(cloudwatch.describe_failure(exc, group, cfg)) from exc
-
-    # Deterministic order: busiest bucket first, then uri for a stable tie-break
-    # so repeated runs and test assertions don't depend on dict/insertion order.
-    groups = [
-        DeliveryGroup(uri=uri, status=status, count=count)
-        for (uri, status), count in counts.items()
-    ]
-    groups.sort(key=lambda g: (-g.count, g.uri, g.status))
-    return DeliveryScan(groups=groups)
-
-
-def scan_syncs(cfg: LogsConfig, window: Window) -> SyncScan:
-    """Count kind="window" sync-complete lines and sum their upserted rows.
-
-    Parses the JSON slog line directly for `kind`/`upserted` rather than via
-    logparse: logparse flattens slog attrs into a display string, but these two
-    fields need to stay typed (an int sum, an exact kind match). Non-JSON lines
-    and JSON without the exact sync-complete message are skipped.
-
-    Superseded by `scan`, which produces this same SyncScan from a pass shared
-    with the delivery aggregation. Kept (and deliberately still uncapped,
-    max_events=0) only until the doctor is switched over.
-    """
-    client = cloudwatch.build_client(cfg)
-    group = log_group_for("api")
-
-    window_sync_count = 0
-    upserted_total = 0
-    try:
-        for page in _paginate_whoop(client, group, window, 0):
-            for event in page.get("events", []):
-                record = _parse_sync(event.get("message", ""))
-                if record is None:
-                    continue
-                if record.get("kind") != WINDOW_KIND:
-                    continue
-                window_sync_count += 1
-                upserted = record.get("upserted", 0)
-                if isinstance(upserted, int):
-                    upserted_total += upserted
-    except (ClientError, BotoCoreError) as exc:
-        raise cloudwatch.CloudWatchError(cloudwatch.describe_failure(exc, group, cfg)) from exc
-
-    return SyncScan(window_sync_count=window_sync_count, upserted_total=upserted_total)
 
 
 def _parse_sync(message: str) -> dict | None:

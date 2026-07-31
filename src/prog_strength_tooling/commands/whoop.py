@@ -7,11 +7,12 @@ Two commands:
 `doctor` is designed to work with *whatever* credentials the operator has. The
 five log-derived checks (deliveries arriving, on the served path, with an
 accepted signature, producing syncs, landing rows) read CloudWatch with the
-operator's own AWS creds — no admin token needed. The two admin-derived checks
-(connection health, data freshness) need an admin JWT AND a `--user`; when
-either is absent they degrade to *skipped* rather than failing, so a missing
-`PST_TOKEN` never blocks the log diagnosis. This mirrors how the original
-outage was actually found: from the api's request log alone.
+operator's own AWS creds — no admin token needed, and all five are served from
+a single capped pass over the api log group (`whooplogs.scan`). The two
+admin-derived checks (connection health, data freshness) need an admin JWT AND
+a `--user`; when either is absent they degrade to *skipped* rather than
+failing, so a missing `PST_TOKEN` never blocks the log diagnosis. This mirrors
+how the original outage was actually found: from the api's request log alone.
 
 `resync` hits an admin-gated endpoint, so it resolves through
 `config.resolve_admin` (a missing token stops it up front with instructions,
@@ -70,6 +71,11 @@ def doctor(
         help=f"Relative log window ending now, e.g. 24h, 7d. Default: {DEFAULT_SINCE}.",
         show_default=False,
     ),
+    max_events: int = typer.Option(
+        whooplogs.MAX_EVENTS,
+        "--max-events",
+        help="Stop the CloudWatch scan after this many events; 0 scans the whole window.",
+    ),
     env: str = typer.Option(
         None,
         "--env",
@@ -111,13 +117,16 @@ def doctor(
 
     Exits 0 when healthy, 1 when it found problems, 2 on a config or AWS error.
     """
+    if max_events < 0:
+        err_console.print("[red]error:[/red] --max-events must be 0 or greater.")
+        raise typer.Exit(code=EXIT_ERROR)
+
     try:
         # The log checks are non-negotiable, so their config/window errors are
         # fatal (exit 2) — same shape as logs.py.
         cfg_logs = resolve_logs(env, None, profile, region)
         window = resolve(since or DEFAULT_SINCE, None, None)
-        deliveries = whooplogs.scan_deliveries(cfg_logs, window)
-        syncs = whooplogs.scan_syncs(cfg_logs, window)
+        scan = whooplogs.scan(cfg_logs, window, max_events)
     except (ConfigError, WindowError, cloudwatch.CloudWatchError) as exc:
         err_console.print(f"[red]error:[/red] {exc}")
         raise typer.Exit(code=EXIT_ERROR)
@@ -159,9 +168,9 @@ def doctor(
         )
 
     diagnosis = whoop.diagnose(
-        deliveries, syncs, connection, token_present, now=datetime.now(timezone.utc)
+        scan.deliveries, scan.syncs, connection, token_present, now=datetime.now(timezone.utc)
     )
-    render_diagnosis(diagnosis, as_json=as_json)
+    render_diagnosis(diagnosis, scan, as_json=as_json)
 
     if not diagnosis.healthy:
         raise typer.Exit(code=EXIT_FINDINGS)
