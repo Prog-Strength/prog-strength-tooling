@@ -21,6 +21,8 @@ from prog_strength_tooling import logsetup
         (2, False, None, logging.DEBUG, True),
         (3, False, None, logging.DEBUG, True),
         (0, True, None, logging.WARNING, False),
+        # --quiet beats -v/-vv when both are given: silence wins.
+        (2, True, None, logging.WARNING, False),
         # An explicit flag wins over the env var, in both directions.
         (1, False, "warning", logging.DEBUG, False),
         (0, True, "debug", logging.WARNING, False),

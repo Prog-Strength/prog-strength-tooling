@@ -33,6 +33,9 @@ WIRE_LOGGERS = ("boto3", "botocore", "urllib3", "httpx", "httpcore")
 #: Level when nothing selects one.
 DEFAULT_LEVEL = logging.INFO
 
+#: The single source of truth for parsing PST_LOG_LEVEL. Deliberately not
+#: consulted once a flag (--quiet, -v, -vv) has already decided the level —
+#: see resolve_level's precedence order below.
 _LEVELS = {
     "debug": logging.DEBUG,
     "info": logging.INFO,
@@ -48,10 +51,17 @@ def resolve_level(
 
     Mirrors the flag -> env -> default precedence `config.py` documents, so an
     explicit `-v` on the command line always beats a stale `PST_LOG_LEVEL` left
-    in a shell profile.
+    in a shell profile. When both --quiet and -v/-vv are given, --quiet wins:
+    an operator who explicitly asked for silence gets silence, even over a
+    verbosity flag.
 
-    The third element is a warning to emit once, or None. An unparseable env
-    value falls back to INFO and says so: a typo must never silence the tool.
+    The second element, wire_logs_on, says whether the WIRE_LOGGERS (boto3,
+    httpx, etc.) should be turned on too — true only at -vv.
+
+    The third element is a warning to emit once, or None. When no flag
+    applies, an unparseable env value falls back to INFO and says so: a
+    typo must never silence the tool. (If a flag does apply, the env var is
+    never inspected, so it can't produce a warning either way.)
     """
     if quiet:
         return logging.WARNING, False, None
