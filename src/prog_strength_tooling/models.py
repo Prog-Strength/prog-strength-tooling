@@ -59,3 +59,34 @@ class SearchResult(BaseModel):
 
     threshold: float
     matches: list[Match] = Field(default_factory=list)
+
+
+class WhoopConnection(BaseModel):
+    """One user's WHOOP admin connection row.
+
+    Mirrors the DTO returned by GET /admin/whoop/connections (as a list under
+    `data.connections`) and GET /admin/whoop/connections/{userID} (a single
+    object under `data`). `latest_recovery_date` is null until the first
+    recovery row is ingested.
+    """
+
+    user_id: str
+    whoop_user_id: int
+    status: str
+    scopes: str
+    token_expires_at: str
+    token_expired: bool
+    connected_at: str
+    updated_at: str
+    latest_recovery_date: str | None = None
+    recovery_row_count: int
+
+
+class WhoopResyncOutcome(BaseModel):
+    """Inner `data` shape of POST /admin/whoop/resync — a per-reason tally of
+    what the resync did across the requested window."""
+
+    upserted: int
+    skipped_unscored: int
+    skipped_no_cycle: int
+    skipped_bad_date: int

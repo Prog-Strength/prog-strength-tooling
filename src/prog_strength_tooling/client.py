@@ -15,7 +15,7 @@ from __future__ import annotations
 import httpx
 
 from .config import Config
-from .models import MemoryList, SearchResult
+from .models import MemoryList, SearchResult, WhoopConnection, WhoopResyncOutcome
 
 
 class ClientError(Exception):
@@ -123,3 +123,71 @@ class MemoryClient:
         except ValueError:
             pass
         raise APIError(resp.status_code, message)
+
+
+class WhoopAdminClient:
+    """Client for the admin WHOOP integration surface.
+
+    Wraps the three admin routes the API's WHOOP subsystem exposes:
+      GET  /admin/whoop/connections           -> every user's connection row
+      GET  /admin/whoop/connections/{userID}  -> one user's connection (404 if none)
+      POST /admin/whoop/resync                -> re-ingest a user's recovery window
+
+    Structurally identical to MemoryClient: admin-gated (bearer token), the same
+    envelope-unwrapping and error mapping, and usable as a context manager so the
+    underlying httpx.Client is closed:
+        with WhoopAdminClient(cfg) as c:
+            c.list_connections()
+    """
+
+    def __init__(self, cfg: Config, timeout: float = 30.0) -> None:
+        if not cfg.token:
+            raise ClientError("no admin token. Pass --token or set PST_TOKEN to an admin JWT.")
+        self._client = httpx.Client(
+            base_url=cfg.base_url,
+            headers={"Authorization": f"Bearer {cfg.token}"},
+            timeout=timeout,
+        )
+
+    def __enter__(self) -> "WhoopAdminClient":
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.close()
+
+    def close(self) -> None:
+        self._client.close()
+
+    # --- endpoints ------------------------------------------------------
+
+    def list_connections(self) -> list[WhoopConnection]:
+        """GET /admin/whoop/connections — every user's WHOOP connection row."""
+        data = self._get("/admin/whoop/connections", {})
+        return [WhoopConnection.model_validate(c) for c in data.get("connections", [])]
+
+    def get_connection(self, user_id: str) -> WhoopConnection:
+        """GET /admin/whoop/connections/{userID} — one user's connection (404 if none)."""
+        data = self._get(f"/admin/whoop/connections/{user_id}", {})
+        return WhoopConnection.model_validate(data)
+
+    def resync(self, user_id: str, window_days: int) -> WhoopResyncOutcome:
+        """POST /admin/whoop/resync — re-ingest a user's recovery window."""
+        body: dict[str, object] = {"user_id": user_id, "window_days": window_days}
+        data = self._post("/admin/whoop/resync", body)
+        return WhoopResyncOutcome.model_validate(data)
+
+    # --- transport ------------------------------------------------------
+
+    def _get(self, path: str, params: dict[str, str | int]) -> dict:
+        try:
+            resp = self._client.get(path, params=params)
+        except httpx.HTTPError as exc:
+            raise ClientError(str(exc)) from exc
+        return MemoryClient._unwrap(resp)
+
+    def _post(self, path: str, body: dict[str, object]) -> dict:
+        try:
+            resp = self._client.post(path, json=body)
+        except httpx.HTTPError as exc:
+            raise ClientError(str(exc)) from exc
+        return MemoryClient._unwrap(resp)

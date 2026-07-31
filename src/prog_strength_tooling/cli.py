@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import typer
 
-from .commands import logs, memory, status
+from .commands import logs, memory, status, whoop
 
 # Typer collapses single newlines within a paragraph but preserves blank-line
 # paragraph breaks, so each example is its own paragraph to keep it on one line.
@@ -48,6 +48,7 @@ app = typer.Typer(
 
 app.add_typer(memory.app, name="memory")
 app.add_typer(logs.app, name="logs")
+app.add_typer(whoop.app, name="whoop")
 app.command("status")(status.status)
 
 
