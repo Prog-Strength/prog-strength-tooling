@@ -2,12 +2,18 @@
 
 A personal [Typer](https://typer.tiangolo.com/) CLI (`pst`) for probing queries
 and maintenance tasks against the prog-strength stack. It talks to the
-prog-strength-api admin endpoints over HTTP — it is an operator tool, not part
-of the running system.
+prog-strength-api admin endpoints over HTTP, and to CloudWatch Logs for the
+deployed services' logs — it is an operator tool, not part of the running
+system.
 
-The first command group is **`memory`**: inspect the agent vector memory stored
-per user, so you can see what we remember about a user and confirm retrieval is
-working as expected.
+Two command groups so far:
+
+- **`memory`** — inspect the agent vector memory stored per user, so you can
+  see what we remember about a user and confirm retrieval is working as
+  expected.
+- **`logs`** — pull the server-side log lines for a request id, so a failed
+  call reported from the web or mobile client leads straight to what the
+  backend did.
 
 > **Note:** the api repo also ships a Go operator CLI, `memctl`, over the same
 > two endpoints. `pst` is the Python home for tooling going forward (richer
@@ -78,6 +84,7 @@ Resolution precedence for the api URL, highest first:
 | Environment | `--env` | `PST_ENV` | `prod` |
 | Explicit base URL | `--api` | `PST_API_URL` | _(derived from environment)_ |
 | Admin JWT | `--token` | `PST_TOKEN` | _(none — required)_ |
+| AWS profile (`logs` only) | `--profile` | `PST_AWS_PROFILE` | _(AWS default chain)_ |
 
 Export once per shell:
 
@@ -138,6 +145,46 @@ Threshold/k semantics match the api contract:
 
 Lower distance = closer match.
 
+### Find a request's server-side logs
+
+```bash
+pst logs trace <request-id>                    # all 3 services, last 24h
+pst logs trace <request-id> --since 7d         # widen the window
+pst logs trace <request-id> --service api      # one service (repeatable)
+pst logs trace <request-id> --raw              # original lines, unparsed
+pst logs trace <request-id> --json             # structured, for scripting
+```
+
+The workflow: the web or mobile client hits an error, the response carries a
+`request_id` (in the error envelope body, and on the `X-Request-ID` header),
+and you need the server side of that call. This searches the CloudWatch log
+groups `prog-strength-infra` creates — `/prog-strength/{api,agent,mcp}` in
+`us-east-2` — and prints every matching line on one timestamp-ordered
+timeline, normalizing the api's JSON (Go `slog`) and the agent/mcp's text
+(Python `logging`) into the same table.
+
+**Auth is AWS, not `PST_TOKEN`.** CloudWatch is read with your own AWS
+credentials — the EC2 instance role is deliberately write-only, so reads are
+an operator action. Supply a profile with `--profile` or `PST_AWS_PROFILE`;
+the identity needs `logs:FilterLogEvents` on those groups.
+
+```bash
+export PST_AWS_PROFILE=prog-strength-admin
+```
+
+All three services are searched by default. Not because one id spans them —
+each service accepts an inbound `X-Request-ID` but doesn't forward one, so an
+id lives in exactly one group today — but because an id from a client doesn't
+tell you which service minted it, and guessing wrong looks exactly like "not
+found".
+
+Exit codes make it scriptable: **0** found lines, **1** searched fine but
+matched nothing, **2** configuration or AWS error.
+
+Windows are relative (`--since 90m|24h|7d`, default `24h`) or absolute
+(`--start`/`--end`, UTC); the two can't be combined. CloudWatch retains 30
+days, so nothing older than that is findable.
+
 ## How it maps to the API
 
 | Command | Endpoint |
@@ -145,12 +192,14 @@ Lower distance = closer match.
 | `pst status` | `GET /health` on each of api, agent, mcp |
 | `pst memory list` | `GET /admin/memories?user_id=…` |
 | `pst memory search` | `POST /admin/memories/search` |
+| `pst logs trace` | AWS `logs:FilterLogEvents` on `/prog-strength/{api,agent,mcp}` |
 
 ## Development
 
 ```bash
 uv sync
-uv run pytest        # tests (httpx mocked with respx — no server needed)
+uv run pytest        # tests (httpx mocked with respx, AWS with botocore's
+                     # Stubber — no server and no AWS account needed)
 uv run ruff check .  # lint
 ```
 
@@ -161,8 +210,12 @@ src/prog_strength_tooling/
   cli.py              # `pst` entry point; mounts sub-apps + single commands
   commands/memory.py  # `pst memory list` / `search`
   commands/status.py  # `pst status`
+  commands/logs.py    # `pst logs trace`
   client.py           # httpx client over the admin endpoints
   health.py           # GET /health probing for the status command
+  cloudwatch.py       # CloudWatch Logs queries for the logs command
+  logparse.py         # raw log line -> LogRecord (pure, no I/O)
+  window.py           # --since / --start / --end resolution
   models.py           # pydantic views of the API DTOs
   render.py           # rich tables + --json output
   config.py           # named environments (service URLs) + token resolution
