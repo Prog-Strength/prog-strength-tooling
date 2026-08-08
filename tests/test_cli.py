@@ -11,6 +11,10 @@ from prog_strength_tooling.cli import app
 runner = CliRunner()
 BASE = "http://api.test"
 ENV = {"PST_API_URL": BASE, "PST_TOKEN": "admin-jwt"}
+#: A width real terminals actually have. Rich defaults to 80 columns off a tty,
+#: which folds table cells mid-token and makes a "is this value rendered?"
+#: assertion fail on the line break rather than on the value being missing.
+WIDE_ENV = {**ENV, "COLUMNS": "200"}
 
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
@@ -43,11 +47,105 @@ def test_memory_list_renders_table():
             }
         )
     )
-    result = runner.invoke(app, ["memory", "list", "--user", "u1"], env=ENV)
+    result = runner.invoke(app, ["memory", "list", "--user", "u1"], env=WIDE_ENV)
     assert result.exit_code == 0
-    # rich folds the cell to the non-tty 80-col width, so assert on a token
-    # that fits on one line rather than the full phrase.
-    assert "dumbbells" in result.stdout
+    assert "prefers dumbbells" in result.stdout
+
+
+@respx.mock
+def test_memory_list_shows_each_row_s_source_and_id():
+    """Every row names what it was distilled from and the id to trace it by.
+
+    The three source types exercise both provenance FKs: a chat memory carries
+    source_session_id, while workout/activity notes carry source_workout_id and
+    omit the session field entirely.
+    """
+    respx.get(f"{BASE}/admin/memories").mock(
+        return_value=_ok(
+            {
+                "memories": [
+                    {
+                        "distilled_text": "prefers mornings",
+                        "user_id": "u1",
+                        "source_type": "chat_session",
+                        "source_session_id": "sess9f2a",
+                        "created_at": "2026-06-01T12:00:00Z",
+                    },
+                    {
+                        "distilled_text": "shoulder cranky",
+                        "user_id": "u1",
+                        "source_type": "workout_note",
+                        "source_workout_id": "act31bc",
+                        "created_at": "2026-06-02T12:00:00Z",
+                    },
+                    {
+                        "distilled_text": "hills easy",
+                        "user_id": "u1",
+                        "source_type": "activity_note",
+                        "source_workout_id": "act77de",
+                        "created_at": "2026-06-03T12:00:00Z",
+                    },
+                ]
+            }
+        )
+    )
+    result = runner.invoke(app, ["memory", "list", "--user", "u1"], env=WIDE_ENV)
+    assert result.exit_code == 0
+    out = _plain(result.stdout)
+    assert "source" in out  # the column exists
+    for source_type, source_id in (
+        ("chat_session", "sess9f2a"),
+        ("workout_note", "act31bc"),
+        ("activity_note", "act77de"),
+    ):
+        assert source_type in out
+        assert source_id in out
+
+
+@respx.mock
+def test_memory_list_json_carries_provenance():
+    """--json is the scripting path, so the provenance must survive it."""
+    respx.get(f"{BASE}/admin/memories").mock(
+        return_value=_ok(
+            {
+                "memories": [
+                    {
+                        "distilled_text": "hills easy",
+                        "user_id": "u1",
+                        "source_type": "activity_note",
+                        "source_workout_id": "act77de",
+                        "created_at": "2026-06-03T12:00:00Z",
+                    }
+                ]
+            }
+        )
+    )
+    result = runner.invoke(app, ["memory", "list", "--user", "u1", "--json"], env=ENV)
+    assert result.exit_code == 0
+    out = _plain(result.stdout)
+    assert "activity_note" in out
+    assert "act77de" in out
+
+
+@respx.mock
+def test_memory_list_renders_a_row_with_no_provenance():
+    """Backfilled rows carry neither FK — they must render, not crash."""
+    respx.get(f"{BASE}/admin/memories").mock(
+        return_value=_ok(
+            {
+                "memories": [
+                    {
+                        "distilled_text": "backfilled fact",
+                        "user_id": "u1",
+                        "created_at": "2026-06-01T12:00:00Z",
+                    }
+                ]
+            }
+        )
+    )
+    result = runner.invoke(app, ["memory", "list", "--user", "u1"], env=WIDE_ENV)
+    assert result.exit_code == 0
+    assert "backfilled fact" in result.stdout
 
 
 @respx.mock
@@ -73,6 +171,72 @@ def test_memory_search_json_output():
     assert result.exit_code == 0
     assert "benches 135" in result.stdout
     assert "0.7" in result.stdout
+
+
+@respx.mock
+def test_memory_search_shows_each_hit_s_source_and_id():
+    """A probe hit names its source too — the api sends the same provenance
+    on Match that it sends on a dump row."""
+    respx.post(f"{BASE}/admin/memories/search").mock(
+        return_value=_ok(
+            {
+                "threshold": 0.7,
+                "matches": [
+                    {
+                        "text": "hills easy",
+                        "distance": 0.31,
+                        "source_type": "activity_note",
+                        "source_session_id": "",
+                        "source_workout_id": "act77de",
+                        "created_at": "2026-06-03T12:00:00Z",
+                    },
+                    {
+                        "text": "prefers mornings",
+                        "distance": 0.44,
+                        "source_type": "chat_session",
+                        "source_session_id": "sess9f2a",
+                        "source_workout_id": "",
+                        "created_at": "2026-06-01T12:00:00Z",
+                    },
+                ],
+            }
+        )
+    )
+    result = runner.invoke(
+        app, ["memory", "search", "--user", "u1", "--query", "hills"], env=WIDE_ENV
+    )
+    assert result.exit_code == 0
+    out = _plain(result.stdout)
+    assert "activity_note" in out and "act77de" in out
+    assert "chat_session" in out and "sess9f2a" in out
+
+
+@respx.mock
+def test_memory_search_tolerates_an_api_without_match_provenance():
+    """The api rollout lands after this CLI change, so a hit with no
+    source_type at all must still render."""
+    respx.post(f"{BASE}/admin/memories/search").mock(
+        return_value=_ok(
+            {
+                "threshold": 0.7,
+                "matches": [
+                    {
+                        "text": "benches 135",
+                        "distance": 0.42,
+                        "source_session_id": "s2",
+                        "created_at": "2026-06-02T08:00:00Z",
+                    }
+                ],
+            }
+        )
+    )
+    result = runner.invoke(
+        app, ["memory", "search", "--user", "u1", "--query", "bench"], env=WIDE_ENV
+    )
+    assert result.exit_code == 0
+    out = _plain(result.stdout)
+    assert "benches 135" in out
+    assert "s2" in out  # the session id still surfaces via source_id
 
 
 @respx.mock

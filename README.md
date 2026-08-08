@@ -147,9 +147,28 @@ pst memory list --user <user-id> --limit 50 --offset 50
 pst memory list --user <user-id> --json        # raw JSON for scripting
 ```
 
-Shows each distilled memory with its source session, embedding model/dimension,
-creation time, and whether it's still **active** or has been **superseded** by a
-newer distillation.
+Shows each distilled memory with the **source** it was distilled from and that
+source's **id**, plus embedding model/dimension, creation time, and whether it's
+still **active** or has been **superseded** by a newer distillation.
+
+The source is the API's discriminator, and the id is the row to trace the memory
+back to:
+
+| source | means | source id |
+|---|---|---|
+| `chat_session` | said in conversation with the agent | `chat_sessions.id` |
+| `workout_note` | a note on a lifting session | `activities.id` |
+| `activity_note` | a note on an endurance session — run, hike, walk or ride | `activities.id` |
+
+`activity_note` covers every endurance sport rather than naming it: the API keeps
+the sport in `activities.activity_type` and joins for it, so the id is what
+distinguishes a run from a hike. A memory that predates provenance (backfilled)
+shows `-` in both columns.
+
+`pst memory search` shows the same two columns on each hit. That needs an API
+carrying provenance on a search match (`prog-strength-api` ≥ the release adding
+`source_type` / `source_workout_id` to `Match`); against an older API the source
+columns fall back to `-` rather than failing.
 
 ### Probe retrieval (what the agent would recall)
 
