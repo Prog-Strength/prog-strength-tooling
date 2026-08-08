@@ -101,16 +101,33 @@ def _ok(data):
 
 
 def _connection(**overrides):
+    """A healthy admin connection row, dated relative to now.
+
+    The dates MUST be relative. Check 7 fails any latest_recovery_date more
+    than FRESHNESS_MAX_AGE (48h) behind `now`, so a hardcoded date makes this
+    fixture mean "healthy" only until it ages out — which is exactly how it
+    silently became a failing test. Callers wanting an unhealthy connection
+    pass an explicit override.
+    """
+    from datetime import UTC, datetime, timedelta
+
+    now = datetime.now(UTC)
+
+    def _stamp(delta: timedelta) -> str:
+        return (now + delta).strftime("%Y-%m-%dT%H:%M:%SZ")
+
     conn = {
         "user_id": "u1",
         "whoop_user_id": 12345,
         "status": "connected",
         "scopes": "read:recovery",
-        "token_expires_at": "2026-08-01T12:00:00Z",
+        "token_expires_at": _stamp(timedelta(days=30)),
         "token_expired": False,
-        "connected_at": "2026-06-01T12:00:00Z",
-        "updated_at": "2026-07-31T12:00:00Z",
-        "latest_recovery_date": "2026-07-31",
+        "connected_at": _stamp(timedelta(days=-60)),
+        "updated_at": _stamp(timedelta(hours=-6)),
+        # Today's date: comfortably inside the 48h freshness window whatever
+        # the wall clock says when the suite runs.
+        "latest_recovery_date": now.strftime("%Y-%m-%d"),
         "recovery_row_count": 42,
     }
     conn.update(overrides)
