@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v0.7.0 (2026-08-08)
+
+### Features
+
+- **memory**: Show the source a memory was distilled from in pst memory list and search
+  ([#9](https://github.com/Prog-Strength/prog-strength-tooling/pull/9),
+  [`879b6d7`](https://github.com/Prog-Strength/prog-strength-tooling/commit/879b6d73ecc2881c9bb7d2d1384a19fcc6fa0cee))
+
+
 ## v0.6.0 (2026-07-31)
 
 ### Features
