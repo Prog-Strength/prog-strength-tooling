@@ -30,8 +30,24 @@ def _fmt_dt(value) -> str:
     return value.strftime("%Y-%m-%d %H:%M") if value else "-"
 
 
+#: source_type -> rich style, so the three provenance kinds are distinguishable
+#: at a glance when scanning a dump. Anything unlisted (a source type added by
+#: the api after this table was written) renders unstyled rather than being
+#: dropped — an unknown source is still a source worth showing.
+_SOURCE_STYLES = {
+    "chat_session": "cyan",
+    "workout_note": "magenta",
+    "activity_note": "blue",
+}
+
+
 def render_memories(result: MemoryList, *, as_json: bool) -> None:
-    """Render a user's stored memories."""
+    """Render a user's stored memories.
+
+    Each row names its source (what the memory was distilled from) and the id
+    to trace it back by, so a surprising memory can be chased to the workout,
+    run, hike or chat session that produced it.
+    """
     if as_json:
         _print_json(result)
         return
@@ -43,7 +59,14 @@ def render_memories(result: MemoryList, *, as_json: bool) -> None:
     table = Table(title=f"stored memories ({len(result.memories)})")
     table.add_column("created", style="cyan", no_wrap=True)
     table.add_column("distilled text", style="white", overflow="fold")
-    table.add_column("session", style="dim", no_wrap=True)
+    table.add_column("source", no_wrap=True)
+    # Folded, not truncated: the id exists to be copied into a follow-up
+    # lookup, and rich's default ellipsis on a narrow terminal would hand the
+    # operator half an id that looks whole. min_width reserves the 32 hex
+    # chars the api's id.New() emits, so the common case doesn't wrap the last
+    # character onto its own line; a terminal too narrow to honour it folds the
+    # id intact rather than losing any of it.
+    table.add_column("source id", style="dim", overflow="fold", min_width=32)
     table.add_column("model", style="dim", no_wrap=True)
     table.add_column("dim", justify="right", style="dim")
     table.add_column("superseded", no_wrap=True)
@@ -57,7 +80,8 @@ def render_memories(result: MemoryList, *, as_json: bool) -> None:
         table.add_row(
             _fmt_dt(m.created_at),
             m.distilled_text,
-            m.source_session_id or "-",
+            Text(m.source_type or "-", style=_SOURCE_STYLES.get(m.source_type, "")),
+            m.source_id or "-",
             m.embedding_model or "-",
             str(m.embedding_dim),
             superseded,

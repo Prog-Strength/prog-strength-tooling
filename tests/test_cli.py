@@ -11,6 +11,10 @@ from prog_strength_tooling.cli import app
 runner = CliRunner()
 BASE = "http://api.test"
 ENV = {"PST_API_URL": BASE, "PST_TOKEN": "admin-jwt"}
+#: A width real terminals actually have. Rich defaults to 80 columns off a tty,
+#: which folds table cells mid-token and makes a "is this value rendered?"
+#: assertion fail on the line break rather than on the value being missing.
+WIDE_ENV = {**ENV, "COLUMNS": "200"}
 
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
@@ -43,11 +47,105 @@ def test_memory_list_renders_table():
             }
         )
     )
-    result = runner.invoke(app, ["memory", "list", "--user", "u1"], env=ENV)
+    result = runner.invoke(app, ["memory", "list", "--user", "u1"], env=WIDE_ENV)
     assert result.exit_code == 0
-    # rich folds the cell to the non-tty 80-col width, so assert on a token
-    # that fits on one line rather than the full phrase.
-    assert "dumbbells" in result.stdout
+    assert "prefers dumbbells" in result.stdout
+
+
+@respx.mock
+def test_memory_list_shows_each_row_s_source_and_id():
+    """Every row names what it was distilled from and the id to trace it by.
+
+    The three source types exercise both provenance FKs: a chat memory carries
+    source_session_id, while workout/activity notes carry source_workout_id and
+    omit the session field entirely.
+    """
+    respx.get(f"{BASE}/admin/memories").mock(
+        return_value=_ok(
+            {
+                "memories": [
+                    {
+                        "distilled_text": "prefers mornings",
+                        "user_id": "u1",
+                        "source_type": "chat_session",
+                        "source_session_id": "sess9f2a",
+                        "created_at": "2026-06-01T12:00:00Z",
+                    },
+                    {
+                        "distilled_text": "shoulder cranky",
+                        "user_id": "u1",
+                        "source_type": "workout_note",
+                        "source_workout_id": "act31bc",
+                        "created_at": "2026-06-02T12:00:00Z",
+                    },
+                    {
+                        "distilled_text": "hills easy",
+                        "user_id": "u1",
+                        "source_type": "activity_note",
+                        "source_workout_id": "act77de",
+                        "created_at": "2026-06-03T12:00:00Z",
+                    },
+                ]
+            }
+        )
+    )
+    result = runner.invoke(app, ["memory", "list", "--user", "u1"], env=WIDE_ENV)
+    assert result.exit_code == 0
+    out = _plain(result.stdout)
+    assert "source" in out  # the column exists
+    for source_type, source_id in (
+        ("chat_session", "sess9f2a"),
+        ("workout_note", "act31bc"),
+        ("activity_note", "act77de"),
+    ):
+        assert source_type in out
+        assert source_id in out
+
+
+@respx.mock
+def test_memory_list_json_carries_provenance():
+    """--json is the scripting path, so the provenance must survive it."""
+    respx.get(f"{BASE}/admin/memories").mock(
+        return_value=_ok(
+            {
+                "memories": [
+                    {
+                        "distilled_text": "hills easy",
+                        "user_id": "u1",
+                        "source_type": "activity_note",
+                        "source_workout_id": "act77de",
+                        "created_at": "2026-06-03T12:00:00Z",
+                    }
+                ]
+            }
+        )
+    )
+    result = runner.invoke(app, ["memory", "list", "--user", "u1", "--json"], env=ENV)
+    assert result.exit_code == 0
+    out = _plain(result.stdout)
+    assert "activity_note" in out
+    assert "act77de" in out
+
+
+@respx.mock
+def test_memory_list_renders_a_row_with_no_provenance():
+    """Backfilled rows carry neither FK — they must render, not crash."""
+    respx.get(f"{BASE}/admin/memories").mock(
+        return_value=_ok(
+            {
+                "memories": [
+                    {
+                        "distilled_text": "backfilled fact",
+                        "user_id": "u1",
+                        "created_at": "2026-06-01T12:00:00Z",
+                    }
+                ]
+            }
+        )
+    )
+    result = runner.invoke(app, ["memory", "list", "--user", "u1"], env=WIDE_ENV)
+    assert result.exit_code == 0
+    assert "backfilled fact" in result.stdout
 
 
 @respx.mock
