@@ -165,6 +165,11 @@ the sport in `activities.activity_type` and joins for it, so the id is what
 distinguishes a run from a hike. A memory that predates provenance (backfilled)
 shows `-` in both columns.
 
+`pst memory search` shows the same two columns on each hit. That needs an API
+carrying provenance on a search match (`prog-strength-api` ≥ the release adding
+`source_type` / `source_workout_id` to `Match`); against an older API the source
+columns fall back to `-` rather than failing.
+
 ### Probe retrieval (what the agent would recall)
 
 ```bash

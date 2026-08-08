@@ -174,6 +174,72 @@ def test_memory_search_json_output():
 
 
 @respx.mock
+def test_memory_search_shows_each_hit_s_source_and_id():
+    """A probe hit names its source too — the api sends the same provenance
+    on Match that it sends on a dump row."""
+    respx.post(f"{BASE}/admin/memories/search").mock(
+        return_value=_ok(
+            {
+                "threshold": 0.7,
+                "matches": [
+                    {
+                        "text": "hills easy",
+                        "distance": 0.31,
+                        "source_type": "activity_note",
+                        "source_session_id": "",
+                        "source_workout_id": "act77de",
+                        "created_at": "2026-06-03T12:00:00Z",
+                    },
+                    {
+                        "text": "prefers mornings",
+                        "distance": 0.44,
+                        "source_type": "chat_session",
+                        "source_session_id": "sess9f2a",
+                        "source_workout_id": "",
+                        "created_at": "2026-06-01T12:00:00Z",
+                    },
+                ],
+            }
+        )
+    )
+    result = runner.invoke(
+        app, ["memory", "search", "--user", "u1", "--query", "hills"], env=WIDE_ENV
+    )
+    assert result.exit_code == 0
+    out = _plain(result.stdout)
+    assert "activity_note" in out and "act77de" in out
+    assert "chat_session" in out and "sess9f2a" in out
+
+
+@respx.mock
+def test_memory_search_tolerates_an_api_without_match_provenance():
+    """The api rollout lands after this CLI change, so a hit with no
+    source_type at all must still render."""
+    respx.post(f"{BASE}/admin/memories/search").mock(
+        return_value=_ok(
+            {
+                "threshold": 0.7,
+                "matches": [
+                    {
+                        "text": "benches 135",
+                        "distance": 0.42,
+                        "source_session_id": "s2",
+                        "created_at": "2026-06-02T08:00:00Z",
+                    }
+                ],
+            }
+        )
+    )
+    result = runner.invoke(
+        app, ["memory", "search", "--user", "u1", "--query", "bench"], env=WIDE_ENV
+    )
+    assert result.exit_code == 0
+    out = _plain(result.stdout)
+    assert "benches 135" in out
+    assert "s2" in out  # the session id still surfaces via source_id
+
+
+@respx.mock
 def test_missing_token_fails_before_any_request(monkeypatch):
     monkeypatch.delenv("PST_TOKEN", raising=False)
     route = respx.get(f"{BASE}/admin/memories").mock(return_value=_ok({"memories": []}))

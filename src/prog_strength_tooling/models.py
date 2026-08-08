@@ -59,8 +59,21 @@ class Match(BaseModel):
     text: str
     distance: float
     created_at: datetime
-    #: May be absent for backfilled memories — default rather than crash.
+    #: Provenance, mirroring Memory's. May be absent for backfilled memories,
+    #: and absent wholesale against an api older than the release that added
+    #: source_type/source_workout_id to Match — default rather than crash.
+    source_type: str = ""
     source_session_id: str = ""
+    source_workout_id: str = ""
+
+    @property
+    def source_id(self) -> str:
+        """The id this hit traces back to — a chat session or an activity.
+
+        Same contract as Memory.source_id: exactly one FK is populated, so
+        callers get "the id to look up" without branching on source_type.
+        """
+        return self.source_session_id or self.source_workout_id
 
 
 class MemoryList(BaseModel):

@@ -112,3 +112,36 @@ def test_match_without_source_session_id():
     )
     assert isinstance(s.matches[0], Match)
     assert s.matches[0].source_session_id == ""
+    # An api predating provenance on Match omits all three fields at once.
+    assert s.matches[0].source_type == ""
+    assert s.matches[0].source_id == ""
+
+
+def test_match_traces_back_to_its_source():
+    s = SearchResult.model_validate(
+        {
+            "threshold": 0.7,
+            "matches": [
+                {
+                    "text": "hills felt easy",
+                    "distance": 0.31,
+                    "source_type": "activity_note",
+                    "source_session_id": "",
+                    "source_workout_id": "77de",
+                    "created_at": "2026-06-22T04:51:58Z",
+                },
+                {
+                    "text": "prefers mornings",
+                    "distance": 0.44,
+                    "source_type": "chat_session",
+                    "source_session_id": "9f2a",
+                    "source_workout_id": "",
+                    "created_at": "2026-06-22T04:51:58Z",
+                },
+            ],
+        }
+    )
+    assert s.matches[0].source_type == "activity_note"
+    assert s.matches[0].source_id == "77de"
+    assert s.matches[1].source_type == "chat_session"
+    assert s.matches[1].source_id == "9f2a"

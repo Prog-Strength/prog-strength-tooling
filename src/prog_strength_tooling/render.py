@@ -107,14 +107,18 @@ def render_search(result: SearchResult, *, as_json: bool) -> None:
     table = Table(title=f"matches ({len(result.matches)})")
     table.add_column("distance", justify="right", style="magenta", no_wrap=True)
     table.add_column("text", style="white", overflow="fold")
-    table.add_column("session", style="dim", no_wrap=True)
+    table.add_column("source", no_wrap=True)
+    # Same reasoning as the dump's column: folded so a narrow terminal never
+    # hands back half an id. See render_memories.
+    table.add_column("source id", style="dim", overflow="fold", min_width=32)
     table.add_column("created", style="cyan", no_wrap=True)
 
     for hit in result.matches:
         table.add_row(
             f"{hit.distance:.4f}",
             hit.text,
-            hit.source_session_id or "-",
+            Text(hit.source_type or "-", style=_SOURCE_STYLES.get(hit.source_type, "")),
+            hit.source_id or "-",
             _fmt_dt(hit.created_at),
         )
     console.print(table)
