@@ -1,5 +1,11 @@
 # prog-strength-tooling
 
+> [!NOTE]
+> **Prog Strength was retired in November 2026.** It is offline on purpose, to cut
+> hosting costs, and this repository is archived as read-only. progstrength.fitness
+> no longer serves the app. The database, media, and infrastructure state are kept in
+> cold storage; see [prog-strength-archive](https://github.com/Prog-Strength/prog-strength-archive).
+
 A personal [Typer](https://typer.tiangolo.com/) CLI (`pst`) for probing queries
 and maintenance tasks against the prog-strength stack. It talks to the
 prog-strength-api admin endpoints over HTTP, and to CloudWatch Logs for the
